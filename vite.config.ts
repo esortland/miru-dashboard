@@ -11,7 +11,8 @@ export default defineConfig({
       input: {
         dashboard: resolve(rootDir, "index.html"),
         background: resolve(rootDir, "background.html"),
-        map: resolve(rootDir, "map.html")
+        map: resolve(rootDir, "map.html"),
+        play: resolve(rootDir, "play.html")
       }
     }
   }
