@@ -1,8 +1,8 @@
 {
   "name": "MIRU Companion",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "manifest_version": 1,
-  "description": "MIRU companion with an interactive persistent hex map, dashboard, combat control, inventory, and Owlbear tools.",
+  "description": "A cohesive MIRU digital play surface with persistent field controls, an interactive hex map, combat, inventory, and Owlbear integration.",
   "author": "Eric Sortland",
   "icon": "/miru-dashboard/icon.svg",
   "background_url": "/miru-dashboard/background.html",
