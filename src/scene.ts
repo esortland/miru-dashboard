@@ -8,6 +8,7 @@ export type StampName = (typeof STAMPS)[number];
 
 export const STAMP_TOOL_ID = "com.esortland.miru-companion/stamp-tool";
 export const STAMP_MODE_ID = "com.esortland.miru-companion/stamp-mode";
+const stampIcon = `${import.meta.env.BASE_URL}stamp-tool.svg`;
 
 const palette: Record<StampName, { fill: string; stroke: string; glyph: string }> = {
   Forest: { fill: "#d7e2d0", stroke: "#1f2922", glyph: "🌲" },
@@ -96,14 +97,14 @@ export async function armStamp(name: StampName) {
 export async function setupStampTool() {
   await OBR.tool.create({
     id: STAMP_TOOL_ID,
-    icons: [{ icon: "/stamp-tool.svg", label: "MIRU Stamp" }],
+    icons: [{ icon: stampIcon, label: "MIRU Stamp" }],
     defaultMode: STAMP_MODE_ID,
     defaultMetadata: { selectedStamp: "Forest" }
   });
 
   await OBR.tool.createMode({
     id: STAMP_MODE_ID,
-    icons: [{ icon: "/stamp-tool.svg", label: "Place MIRU stamp", filter: { activeTools: [STAMP_TOOL_ID] } }],
+    icons: [{ icon: stampIcon, label: "Place MIRU stamp", filter: { activeTools: [STAMP_TOOL_ID] } }],
     cursors: [{ cursor: "crosshair" }],
     onToolClick: (context, event) => {
       const selected = context.metadata.selectedStamp;
