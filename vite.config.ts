@@ -1,12 +1,15 @@
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+
+const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        dashboard: resolve(__dirname, "index.html"),
-        background: resolve(__dirname, "background.html")
+        dashboard: resolve(rootDir, "index.html"),
+        background: resolve(rootDir, "background.html")
       }
     }
   }
