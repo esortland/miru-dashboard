@@ -14,36 +14,43 @@ function classifySections() {
       if (section.classList.contains("vitals")) section.dataset.miruSection = "vitals";
       return;
     }
-    const key = title.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    let key = title.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (key === "combat-control") key = "combat";
     section.dataset.miruSection = key;
   });
 }
 
+async function toggleDashboard() {
+  if (isFullDashboard) {
+    await OBR.modal.close(DASHBOARD_MODAL_ID);
+    return;
+  }
+
+  await OBR.modal.open({
+    id: DASHBOARD_MODAL_ID,
+    url: `${import.meta.env.BASE_URL}index.html?full=1`,
+    fullScreen: true,
+    hidePaper: true
+  });
+}
+
 function injectDashboardButton() {
-  const hero = document.querySelector<HTMLElement>(".hero");
-  if (!hero || hero.querySelector("[data-miru-dashboard-toggle]")) return;
+  if (document.querySelector("[data-miru-dashboard-toggle]")) return;
 
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.miruDashboardToggle = "true";
-  button.className = "dashboard-toggle";
-  button.textContent = isFullDashboard ? "Close dashboard" : "Open dashboard";
-  button.addEventListener("click", () => {
-    void OBR.onReady(async () => {
-      if (isFullDashboard) {
-        await OBR.modal.close(DASHBOARD_MODAL_ID);
-        return;
-      }
-      await OBR.modal.open({
-        id: DASHBOARD_MODAL_ID,
-        url: `${import.meta.env.BASE_URL}index.html?full=1`,
-        fullScreen: true,
-        hidePaper: true
-      });
-    });
-  });
+  button.className = isFullDashboard ? "dashboard-toggle" : "dashboard-toggle dashboard-toggle-fixed";
+  button.textContent = isFullDashboard ? "Close dashboard" : "Open full dashboard";
+  button.addEventListener("click", () => void toggleDashboard());
 
-  hero.append(button);
+  if (isFullDashboard) {
+    const hero = document.querySelector<HTMLElement>(".hero");
+    if (hero) hero.append(button);
+    else document.body.append(button);
+  } else {
+    document.body.append(button);
+  }
 }
 
 function enhance() {
