@@ -1,7 +1,8 @@
 import OBR from "@owlbear-rodeo/sdk";
 import "./style.css";
-import { clamp, DEFAULT_STATE, loadState, MiruState, saveState, Step } from "./state";
+import { clamp, DEFAULT_COMBAT, DEFAULT_STATE, loadState, MiruState, saveState, Step } from "./state";
 import { armStamp, ICONS, StampName, TERRAIN } from "./scene";
+import { attemptEscape, basicAttack, enemyTurn, resetCombatLog, startCombat, techAttack, TRAINED_TECH, TrainedTechKey } from "./combat";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const steps: Step[] = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P"];
@@ -49,6 +50,12 @@ function setState(patch: Partial<MiruState>) {
   scheduleSave();
 }
 
+function replaceState(next: MiruState) {
+  state = next;
+  render();
+  scheduleSave();
+}
+
 function adjust(key: "hp"|"ep"|"day"|"starvation"|"poison"|"sleepDeprivation"|"minorInjuries", delta: number) {
   const max = key === "day" ? 66 : key === "sleepDeprivation" ? 5 : key === "minorInjuries" ? 3 : key === "hp" || key === "ep" ? 20 : 8;
   const min = key === "day" ? 1 : 0;
@@ -69,7 +76,7 @@ function inventoryHtml() {
   if (!rows.length) return `<div class="empty">Bag is empty.</div>`;
   return rows.map(([name,count]) => `<div class="item-row">
     <div class="item-name"><b>${escapeHtml(name)}</b><small>×${count}</small></div>
-    <div class="item-actions"><button data-inv="${escapeHtml(name)}" data-delta="-1" title="Remove one">−</button><button data-inv="${escapeHtml(name)}" data-delta="1" title="Add one">+</button><button class="equip" data-equip="${escapeHtml(name)}">Equip</button></div>
+    <div class="item-actions"><button data-inv="${escapeHtml(name)}" data-delta="-1">−</button><button data-inv="${escapeHtml(name)}" data-delta="1">+</button><button class="equip" data-equip="${escapeHtml(name)}">Equip</button></div>
   </div>`).join("");
 }
 
@@ -88,10 +95,41 @@ function techSkillsHtml() {
   }).join("");
 }
 
+function combatHtml() {
+  const c = state.combat;
+  const techButtons = (Object.keys(TRAINED_TECH) as TrainedTechKey[])
+    .filter(key => (state.techSkills[key] ?? 0) > 0)
+    .map(key => {
+      const s = TRAINED_TECH[key];
+      return `<button data-tech-attack="${key}">${key} <b>Lv ${state.techSkills[key]}</b><small>-${s.cost} EP${s.atk ? ` • +${s.atk} ATK` : " • +3 STUN"}</small></button>`;
+    }).join("") || `<div class="empty">Learn TS-1–TS-4 to enable trained attacks.</div>`;
+  const log = c.log.length ? c.log.slice().reverse().map(x=>`<div>${escapeHtml(x)}</div>`).join("") : `<div class="empty">Combat log is empty.</div>`;
+  return `
+    <div class="combat-head"><div><b>${escapeHtml(c.enemyName)}</b><span>${c.enemyHp}/${c.enemyMaxHp} HP</span></div><span class="combat-state ${c.active?"live":""}">${c.active?"COMBAT":"READY"}</span></div>
+    <div class="combat-grid">
+      <label>Enemy <input data-combat="enemyName" value="${escapeHtml(c.enemyName)}" maxlength="48"></label>
+      <label>Max HP <input type="number" data-combat="enemyMaxHp" value="${c.enemyMaxHp}" min="1" max="999"></label>
+      <label>HP <input type="number" data-combat="enemyHp" value="${c.enemyHp}" min="0" max="999"></label>
+      <label>DEF <input type="number" data-combat="enemyDef" value="${c.enemyDef}" min="0" max="99"></label>
+      <label>ESC <input type="number" data-combat="enemyEsc" value="${c.enemyEsc}" min="0" max="99"></label>
+      <label class="check"><input type="checkbox" data-combat-check="robot" ${c.robot?"checked":""}> Robot</label>
+      <label>ATK 1–2 <input type="number" data-combat="enemyAtkLow" value="${c.enemyAtkLow}" min="0" max="99"></label>
+      <label>ATK 3–4 <input type="number" data-combat="enemyAtkMid" value="${c.enemyAtkMid}" min="0" max="99"></label>
+      <label>ATK 5–6 <input type="number" data-combat="enemyAtkHigh" value="${c.enemyAtkHigh}" min="0" max="99"></label>
+      <label>Weapon ATK <input type="number" data-combat="weaponAtk" value="${c.weaponAtk}" min="0" max="99"></label>
+      <label>Gear DEF <input type="number" data-combat="equipmentDef" value="${c.equipmentDef}" min="0" max="99"></label>
+    </div>
+    <div class="status-strip"><span>BURN <button data-combat-adjust="burn" data-delta="-1">−</button><b>${c.burn}</b><button data-combat-adjust="burn" data-delta="1">+</button></span><span>STUN <button data-combat-adjust="stun" data-delta="-1">−</button><b>${c.stun}</b><button data-combat-adjust="stun" data-delta="1">+</button></span></div>
+    <div class="combat-actions"><button id="start-combat" class="primary">${c.active?"Restart combat":"Start combat"}</button><button id="enemy-turn">Enemy turn</button><button id="basic-attack">Basic attack</button><button id="escape-combat">Escape -2 EP</button></div>
+    <div class="tech-attacks">${techButtons}</div>
+    <div class="combat-log"><div class="log-title"><span>COMBAT LOG</span><button id="clear-combat-log">Clear</button></div>${log}</div>
+  `;
+}
+
 function render() {
   app.innerHTML = `
     <header class="hero"><div><div class="eyebrow">MIRU // FIELD CONTROL</div><h1>DAY ${String(state.day).padStart(2,"0")} <span>${phase(state.step)}</span></h1></div><div class="hex">${escapeHtml(state.currentHex)}</div></header>
-    ${!ready ? `<div class="notice">Open a scene in Owlbear Rodeo to persist state and use map stamping.</div>` : ""}
+    ${!ready ? `<div class="notice">Open a scene in Owlbear Rodeo to persist state and use map tools.</div>` : ""}
 
     <section class="vitals">${meter("HP","hp",state.hp)}${meter("EP","ep",state.ep)}</section>
 
@@ -123,8 +161,19 @@ function render() {
     </section>
 
     <section>
-      <div class="section-title"><span>TECH SKILLS</span><small>TS-1–4 train to level 6</small></div>
+      <div class="section-title"><span>TECH SKILLS</span><small>successful trained attacks level up</small></div>
       <div class="skill-list">${techSkillsHtml()}</div>
+    </section>
+
+    <section class="combat-section">
+      <div class="section-title"><span>COMBAT CONTROL</span><small>ATK − DEF = damage</small></div>
+      ${combatHtml()}
+    </section>
+
+    <section>
+      <div class="section-title"><span>PLAYER TOKEN</span><small>${state.playerTokenId?"bound":"not bound"}</small></div>
+      <div class="stamp-help">Select your player token on the Owlbear map and choose <b>Bind as MIRU player</b> from its context menu. After binding, the <b>Current Position</b> stamp moves that token instead of creating another marker.</div>
+      ${state.playerTokenId?`<button id="unbind-player" class="wide-button">Unbind player token</button>`:""}
     </section>
 
     <section>
@@ -140,13 +189,12 @@ function render() {
       <textarea id="notes" rows="4" placeholder="Objective, unresolved quest, session notes…">${escapeHtml(state.notes)}</textarea>
     </section>
 
-    <details><summary>Campaign controls</summary><div class="campaign-controls"><button id="reset">Reset MIRU state</button><span>Day 1, Step G, G-10, HP/EP 10, 3 Meal Bars.</span></div></details>
+    <details><summary>Campaign controls</summary><div class="campaign-controls"><button id="reset-combat">Reset combat card</button><button id="reset">Reset MIRU state</button></div></details>
   `;
   wire();
 }
 
 function escapeHtml(s: string) { return s.replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]!)); }
-
 async function showError(message: string) { await OBR.notification.show(message, "ERROR"); }
 
 function updateInventory(name: string, delta: number) {
@@ -182,6 +230,15 @@ function adjustSkill(key: string, delta: number) {
   setState({ techSkills:skills });
 }
 
+function setCombatField(key: keyof MiruState["combat"], value: string | number | boolean) {
+  const combat = { ...state.combat, [key]: value };
+  if (key === "enemyMaxHp") {
+    combat.enemyMaxHp = clamp(Number(value), 1, 999);
+    combat.enemyHp = Math.min(combat.enemyHp, combat.enemyMaxHp);
+  }
+  setState({ combat });
+}
+
 function wire() {
   app.querySelectorAll<HTMLButtonElement>("[data-adjust]").forEach(btn=>btn.addEventListener("click",()=>adjust(btn.dataset.adjust as any, Number(btn.dataset.delta))));
   app.querySelectorAll<HTMLButtonElement>("[data-step]").forEach(btn=>btn.addEventListener("click",()=>setState({step: btn.dataset.step as Step})));
@@ -214,12 +271,27 @@ function wire() {
   });
 
   app.querySelectorAll<HTMLButtonElement>("[data-skill]").forEach(btn=>btn.addEventListener("click",()=>adjustSkill(btn.dataset.skill!,Number(btn.dataset.delta))));
-  app.querySelectorAll<HTMLButtonElement>("[data-toggle-skill]").forEach(btn=>btn.addEventListener("click",()=>{
-    const key=btn.dataset.toggleSkill!;const skills={...state.techSkills};if(skills[key])delete skills[key];else skills[key]=1;setState({techSkills:skills});
-  }));
+  app.querySelectorAll<HTMLButtonElement>("[data-toggle-skill]").forEach(btn=>btn.addEventListener("click",()=>{const key=btn.dataset.toggleSkill!;const skills={...state.techSkills};if(skills[key])delete skills[key];else skills[key]=1;setState({techSkills:skills});}));
 
+  app.querySelectorAll<HTMLInputElement>("[data-combat]").forEach(input=>input.addEventListener("change",()=>{
+    const key=input.dataset.combat as keyof MiruState["combat"];
+    setCombatField(key, input.type === "number" ? clamp(Math.floor(Number(input.value)||0),0,999) : input.value.trim());
+  }));
+  app.querySelectorAll<HTMLInputElement>("[data-combat-check]").forEach(input=>input.addEventListener("change",()=>setCombatField(input.dataset.combatCheck as keyof MiruState["combat"],input.checked)));
+  app.querySelectorAll<HTMLButtonElement>("[data-combat-adjust]").forEach(btn=>btn.addEventListener("click",()=>{
+    const key=btn.dataset.combatAdjust as "burn"|"stun";setCombatField(key,clamp(state.combat[key]+Number(btn.dataset.delta),0,3));
+  }));
+  document.querySelector<HTMLButtonElement>("#start-combat")?.addEventListener("click",()=>replaceState(startCombat(state)));
+  document.querySelector<HTMLButtonElement>("#enemy-turn")?.addEventListener("click",()=>replaceState(enemyTurn(state)));
+  document.querySelector<HTMLButtonElement>("#basic-attack")?.addEventListener("click",()=>replaceState(basicAttack(state)));
+  document.querySelector<HTMLButtonElement>("#escape-combat")?.addEventListener("click",()=>replaceState(attemptEscape(state)));
+  app.querySelectorAll<HTMLButtonElement>("[data-tech-attack]").forEach(btn=>btn.addEventListener("click",()=>replaceState(techAttack(state,btn.dataset.techAttack as TrainedTechKey))));
+  document.querySelector<HTMLButtonElement>("#clear-combat-log")?.addEventListener("click",()=>replaceState(resetCombatLog(state)));
+
+  document.querySelector<HTMLButtonElement>("#unbind-player")?.addEventListener("click",()=>setState({playerTokenId:""}));
   const hex=document.querySelector<HTMLInputElement>("#hex-input");hex?.addEventListener("change",()=>setState({currentHex:hex.value.trim().toUpperCase()||"G-10"}));
   const notes=document.querySelector<HTMLTextAreaElement>("#notes");notes?.addEventListener("input",()=>{state={...state,notes:notes.value};scheduleSave();});
+  document.querySelector<HTMLButtonElement>("#reset-combat")?.addEventListener("click",()=>setState({combat:structuredClone(DEFAULT_COMBAT)}));
   document.querySelector<HTMLButtonElement>("#reset")?.addEventListener("click",async()=>{if(confirm("Reset all MIRU Companion campaign state for this scene?")){state=structuredClone(DEFAULT_STATE);await saveState(state);render();}});
 }
 
