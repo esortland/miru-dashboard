@@ -1,0 +1,15 @@
+{
+  "name": "MIRU Companion",
+  "version": "0.1.0",
+  "manifest_version": 1,
+  "description": "A persistent solo-play dashboard and map helper for MIRU in Owlbear Rodeo.",
+  "author": "Eric Sortland",
+  "icon": "/icon.svg",
+  "action": {
+    "title": "MIRU Companion",
+    "icon": "/icon.svg",
+    "popover": "/index.html",
+    "width": 420,
+    "height": 720
+  }
+}
