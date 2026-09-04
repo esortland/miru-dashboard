@@ -10,7 +10,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         dashboard: resolve(rootDir, "index.html"),
-        background: resolve(rootDir, "background.html")
+        background: resolve(rootDir, "background.html"),
+        map: resolve(rootDir, "map.html")
       }
     }
   }
