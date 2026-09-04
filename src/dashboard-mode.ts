@@ -2,6 +2,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import "./dashboard-mode.css";
 
 const DASHBOARD_MODAL_ID = "com.esortland.miru-companion/dashboard";
+const MAP_MODAL_ID = "com.esortland.miru-companion/map";
 const params = new URLSearchParams(window.location.search);
 const isFullDashboard = params.get("full") === "1";
 
@@ -25,39 +26,35 @@ async function toggleDashboard() {
     await OBR.modal.close(DASHBOARD_MODAL_ID);
     return;
   }
-
-  await OBR.modal.open({
-    id: DASHBOARD_MODAL_ID,
-    url: `${import.meta.env.BASE_URL}index.html?full=1`,
-    fullScreen: true,
-    hidePaper: true
-  });
+  await OBR.modal.open({ id: DASHBOARD_MODAL_ID, url: `${import.meta.env.BASE_URL}index.html?full=1`, fullScreen: true, hidePaper: true });
 }
 
-function injectDashboardButton() {
-  if (document.querySelector("[data-miru-dashboard-toggle]")) return;
+async function openMap() {
+  await OBR.modal.open({ id: MAP_MODAL_ID, url: `${import.meta.env.BASE_URL}map.html`, fullScreen: true, hidePaper: true });
+}
 
+function injectLaunchers() {
+  if (!document.querySelector("[data-miru-map-toggle]")) {
+    const mapButton = document.createElement("button");
+    mapButton.type = "button";
+    mapButton.dataset.miruMapToggle = "true";
+    mapButton.className = isFullDashboard ? "dashboard-toggle" : "dashboard-toggle dashboard-map-fixed";
+    mapButton.textContent = "Open interactive map";
+    mapButton.addEventListener("click", () => void openMap());
+    if (isFullDashboard) document.querySelector<HTMLElement>(".hero")?.append(mapButton); else document.body.append(mapButton);
+  }
+
+  if (document.querySelector("[data-miru-dashboard-toggle]")) return;
   const button = document.createElement("button");
   button.type = "button";
   button.dataset.miruDashboardToggle = "true";
   button.className = isFullDashboard ? "dashboard-toggle" : "dashboard-toggle dashboard-toggle-fixed";
   button.textContent = isFullDashboard ? "Close dashboard" : "Open full dashboard";
   button.addEventListener("click", () => void toggleDashboard());
-
-  if (isFullDashboard) {
-    const hero = document.querySelector<HTMLElement>(".hero");
-    if (hero) hero.append(button);
-    else document.body.append(button);
-  } else {
-    document.body.append(button);
-  }
+  if (isFullDashboard) document.querySelector<HTMLElement>(".hero")?.append(button); else document.body.append(button);
 }
 
-function enhance() {
-  classifySections();
-  injectDashboardButton();
-}
-
+function enhance() { classifySections(); injectLaunchers(); }
 const observer = new MutationObserver(enhance);
 observer.observe(document.body, { childList: true, subtree: true });
 enhance();
