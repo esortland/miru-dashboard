@@ -85,7 +85,11 @@ export async function setupStampTool() {
 
   await OBR.tool.createMode({
     id: STAMP_MODE_ID,
-    icons: [{ icon: "/stamp-tool.svg", label: "Place MIRU stamp" }],
+    icons: [{
+      icon: "/stamp-tool.svg",
+      label: "Place MIRU stamp",
+      filter: { activeTools: [STAMP_TOOL_ID] }
+    }],
     cursors: [{ cursor: "crosshair" }],
     onToolClick: (context, event) => {
       const selected = context.metadata.selectedStamp;
