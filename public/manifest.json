@@ -1,8 +1,8 @@
 {
   "name": "MIRU Companion",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "manifest_version": 1,
-  "description": "A persistent solo-play dashboard, inventory tracker, and map-stamping tool for MIRU.",
+  "description": "A persistent solo-play dashboard, combat controller, inventory tracker, and map-stamping tool for MIRU.",
   "author": "Eric Sortland",
   "icon": "/icon.svg",
   "background_url": "/background.html",
@@ -10,7 +10,7 @@
     "title": "MIRU Companion",
     "icon": "/icon.svg",
     "popover": "/index.html",
-    "width": 440,
-    "height": 760
+    "width": 460,
+    "height": 820
   }
 }
