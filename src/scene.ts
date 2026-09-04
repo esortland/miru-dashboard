@@ -1,4 +1,5 @@
 import OBR, { buildShape, buildText } from "@owlbear-rodeo/sdk";
+import { loadState } from "./state";
 
 export const TERRAIN = ["Forest", "Mountain", "Grassland", "Desert", "Swamp"] as const;
 export const ICONS = ["Village", "Quest", "Treasure", "Enemy", "Radio Tower", "Power Supply", "Impassable Edge", "Camp", "Current Position", "Explored"] as const;
@@ -7,6 +8,7 @@ export type StampName = (typeof STAMPS)[number];
 
 export const STAMP_TOOL_ID = "com.esortland.miru-companion/stamp-tool";
 export const STAMP_MODE_ID = "com.esortland.miru-companion/stamp-mode";
+const stampIcon = `${import.meta.env.BASE_URL}stamp-tool.svg`;
 
 const palette: Record<StampName, { fill: string; stroke: string; glyph: string }> = {
   Forest: { fill: "#d7e2d0", stroke: "#1f2922", glyph: "🌲" },
@@ -30,8 +32,25 @@ function isStampName(value: unknown): value is StampName {
   return typeof value === "string" && (STAMPS as readonly string[]).includes(value);
 }
 
+async function moveBoundPlayer(point: { x: number; y: number }) {
+  const state = await loadState();
+  if (!state.playerTokenId) return false;
+  const items = await OBR.scene.items.getItems([state.playerTokenId]);
+  if (!items.length) return false;
+  await OBR.scene.items.updateItems([state.playerTokenId], draft => {
+    if (draft[0]) draft[0].position = { x: point.x, y: point.y };
+  });
+  return true;
+}
+
 export async function createStampAt(name: StampName, point: { x: number; y: number }) {
   if (!(await OBR.scene.isReady())) throw new Error("Open an Owlbear scene first.");
+
+  if (name === "Current Position" && await moveBoundPlayer(point)) {
+    await OBR.notification.show("Bound MIRU player moved", "SUCCESS");
+    return;
+  }
+
   const p = palette[name];
   const size = name === "Impassable Edge"
     ? { w: 180, h: 36, type: "RECTANGLE" as const }
@@ -78,18 +97,14 @@ export async function armStamp(name: StampName) {
 export async function setupStampTool() {
   await OBR.tool.create({
     id: STAMP_TOOL_ID,
-    icons: [{ icon: "/stamp-tool.svg", label: "MIRU Stamp" }],
+    icons: [{ icon: stampIcon, label: "MIRU Stamp" }],
     defaultMode: STAMP_MODE_ID,
     defaultMetadata: { selectedStamp: "Forest" }
   });
 
   await OBR.tool.createMode({
     id: STAMP_MODE_ID,
-    icons: [{
-      icon: "/stamp-tool.svg",
-      label: "Place MIRU stamp",
-      filter: { activeTools: [STAMP_TOOL_ID] }
-    }],
+    icons: [{ icon: stampIcon, label: "Place MIRU stamp", filter: { activeTools: [STAMP_TOOL_ID] } }],
     cursors: [{ cursor: "crosshair" }],
     onToolClick: (context, event) => {
       const selected = context.metadata.selectedStamp;
@@ -97,7 +112,7 @@ export async function setupStampTool() {
       void (async () => {
         const point = await OBR.viewport.inverseTransformPoint(event.pointerPosition);
         await createStampAt(selected, point);
-        await OBR.notification.show(`${selected} placed`, "SUCCESS");
+        if (selected !== "Current Position") await OBR.notification.show(`${selected} placed`, "SUCCESS");
       })();
       return false;
     }
