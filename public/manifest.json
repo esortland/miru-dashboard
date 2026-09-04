@@ -4,12 +4,12 @@
   "manifest_version": 1,
   "description": "A persistent solo-play dashboard, combat controller, inventory tracker, and map-stamping tool for MIRU.",
   "author": "Eric Sortland",
-  "icon": "/icon.svg",
-  "background_url": "/background.html",
+  "icon": "/miru-dashboard/icon.svg",
+  "background_url": "/miru-dashboard/background.html",
   "action": {
     "title": "MIRU Companion",
-    "icon": "/icon.svg",
-    "popover": "/index.html",
+    "icon": "/miru-dashboard/icon.svg",
+    "popover": "/miru-dashboard/index.html",
     "width": 460,
     "height": 820
   }
