@@ -7,6 +7,15 @@ const ROWS = ["A","B","C","D","E","F","G"] as const;
 const TERRAIN = ["Unknown","Forest","Mountain","Grassland","Desert","Swamp"] as const;
 const ICONS = ["None","Village","Quest","Treasure","Enemy","Radio Tower","Power Supply","Camp"] as const;
 
+const SHEET_W = 820;
+const SHEET_H = 576;
+const HEX_RADIUS = 40;
+const HEX_HALF_WIDTH = Math.sqrt(3) * HEX_RADIUS / 2;
+const COLUMN_PITCH = HEX_HALF_WIDTH;
+const ROW_PITCH = HEX_RADIUS * 1.5;
+const ODD_ROW_FIRST_CENTER_X = 101;
+const FIRST_ROW_CENTER_Y = 105;
+
 type HexInfo = { explored?: boolean; terrain?: string; icon?: string; note?: string; visits?: number };
 type MapState = MiruState & { mapHexes?: Record<string, HexInfo> };
 let state: MapState;
@@ -54,6 +63,13 @@ function iconButtons(value:string|undefined){
   return ICONS.map(t=>`<button class="choice icon-choice ${value===t?"active":""}" data-icon-choice="${t}">${t!=="None"?symbol(t,"choice-symbol"):""}<span>${t}</span></button>`).join("");
 }
 
+function hexCenter(col:number,rowIndex:number){
+  return {
+    x: ODD_ROW_FIRST_CENTER_X + (col-1)*COLUMN_PITCH,
+    y: FIRST_ROW_CENTER_Y + rowIndex*ROW_PITCH
+  };
+}
+
 function render(){
   const previousBoard = app.querySelector<HTMLElement>(".map-board");
   const previousScrollLeft = previousBoard?.scrollLeft ?? 0;
@@ -64,30 +80,38 @@ function render(){
   const selectedInfo=info(selected); const canMove=selected!==state.currentHex && adjacent(state.currentHex,selected);
   const cells=hexes.map(h=>{
     const p=parse(h)!; const hi=info(h); const current=h===state.currentHex; const sel=h===selected; const visited=(hi.visits??0)>0 || hi.explored;
-    // Match the printed MIRU map more closely: compact, nearly touching pointy hexes.
-    // Each numeric column is half a hex-width so alternating rows interlock naturally.
-    const x=78 + (p.c-1)*38; const y=80+p.r*66;
+    const {x,y}=hexCenter(p.c,p.r);
     const terrain=(hi.terrain && hi.terrain!=="Unknown")?hi.terrain:""; const icon=hi.icon&&hi.icon!=="None"?hi.icon:"";
-    const pts="0,-44 38,-22 38,22 0,44 -38,22 -38,-22";
-    return `<g class="map-hex ${visited?"visited":""} ${hi.explored?"explored":""} ${current?"current":""} ${sel?"selected":""}" data-hex="${h}" transform="translate(${x} ${y})" aria-label="${h}">
+    const hw=HEX_HALF_WIDTH.toFixed(3), q=(HEX_RADIUS/2).toFixed(3), r=HEX_RADIUS.toFixed(3);
+    const pts=`0,-${r} ${hw},-${q} ${hw},${q} 0,${r} -${hw},${q} -${hw},-${q}`;
+    return `<g class="map-hex ${visited?"visited":""} ${hi.explored?"explored":""} ${current?"current":""} ${sel?"selected":""}" data-hex="${h}" transform="translate(${x.toFixed(3)} ${y.toFixed(3)})" aria-label="${h}">
       <polygon points="${pts}"></polygon>
-      ${terrain?`<g class="terrain-glyph" transform="translate(0 4) scale(.86)">${symbol(terrain,"cell-symbol")}</g>`:""}
-      ${icon?`<g class="icon-glyph" transform="translate(0 -15) scale(.62)">${symbol(icon,"cell-symbol")}</g>`:""}
-      ${(visited||current||sel)?`<text class="hex-id" y="31">${h}</text>`:""}
-      ${visited?`<circle class="visit-mark" cx="0" cy="-32" r="2.7"></circle>`:""}
+      ${terrain?`<g class="terrain-glyph" transform="translate(0 3) scale(.82)">${symbol(terrain,"cell-symbol")}</g>`:""}
+      ${icon?`<g class="icon-glyph" transform="translate(0 -13) scale(.58)">${symbol(icon,"cell-symbol")}</g>`:""}
+      ${visited?`<circle class="visit-mark" cx="0" cy="-${HEX_RADIUS-9}" r="2.5"></circle>`:""}
     </g>`;
   }).join("");
 
-  const columnAxis=Array.from({length:17},(_,i)=>i+1).map(c=>`<text class="axis axis-col" x="${78+(c-1)*38}" y="22">${String(c).padStart(2,"0")}</text>`).join("");
-  const rowAxis=ROWS.map((r,i)=>`<text class="axis axis-row" x="25" y="${84+i*66}">${r}</text>`).join("");
+  const columnAxis=Array.from({length:17},(_,i)=>i+1).map(c=>{
+    const x=hexCenter(c,0).x;
+    const y=c%2===0?45:64;
+    return `<text class="axis axis-col ${c%2===0?"even":"odd"}" x="${x.toFixed(3)}" y="${y}">${String(c).padStart(2,"0")}</text>`;
+  }).join("");
+  const rowAxis=ROWS.map((r,i)=>`<text class="axis axis-row" x="45" y="${(FIRST_ROW_CENTER_Y+i*ROW_PITCH+5).toFixed(3)}">${r}</text>`).join("");
 
   app.innerHTML=`<div class="map-shell">
   <header><div><div class="eyebrow">MIRU // INTERACTIVE MAP</div><h1>EXPLORE</h1></div><div class="position">CURRENT <b>${state.currentHex}</b></div><button id="close-map">Close map</button></header>
   <main>
-    <section class="map-board"><svg viewBox="0 0 770 535" role="img" aria-label="Interactive MIRU hex map">
+    <section class="map-board"><svg viewBox="0 0 ${SHEET_W} ${SHEET_H}" role="img" aria-label="Interactive MIRU hex map modeled on the supplied character map sheet">
       <g class="map-axis">${columnAxis}${rowAxis}</g>
-      <g class="north-mark"><text x="25" y="18">N</text><path d="M25 55V28M19 35L25 28L31 35"/></g>
       <g class="hex-grid">${cells}</g>
+      <g class="north-mark" transform="translate(716 466)">
+        <path class="north-arrow" d="M0-28L11-5L0 3L-11-5Z"/>
+        <path class="north-wing" d="M-14 6L-4 1L0 6L-4 12Z"/>
+        <path class="north-wing" d="M14 6L4 1L0 6L4 12Z"/>
+        <path class="north-tail" d="M0 11L8 18L0 32L-8 18Z"/>
+        <text x="0" y="-8">N</text>
+      </g>
     </svg></section>
     <aside>
       <div class="hex-title"><span>SELECTED HEX</span><b>${selected}</b></div>
