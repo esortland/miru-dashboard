@@ -12,6 +12,12 @@ export type HexInfo = {
   visits?: number;
 };
 
+export type TerrainRollState = {
+  day: number;
+  hex: string;
+  result: number;
+} | null;
+
 export type CombatState = {
   active: boolean;
   enemyName: string;
@@ -33,7 +39,7 @@ export type CombatState = {
 };
 
 export type MiruState = {
-  version: 4;
+  version: 5;
   day: number;
   step: Step;
   hp: number;
@@ -44,6 +50,7 @@ export type MiruState = {
   minorInjuries: number;
   currentHex: string;
   mapHexes: Record<string, HexInfo>;
+  terrainRoll: TerrainRollState;
   inventory: Record<string, number>;
   activeBody: string[];
   techSkills: Record<string, number>;
@@ -73,7 +80,7 @@ export const DEFAULT_COMBAT: CombatState = {
 };
 
 export const DEFAULT_STATE: MiruState = {
-  version: 4,
+  version: 5,
   day: 1,
   step: "G",
   hp: 10,
@@ -84,6 +91,7 @@ export const DEFAULT_STATE: MiruState = {
   minorInjuries: 0,
   currentHex: "G-10",
   mapHexes: { "G-10": { explored: true, visits: 1 } },
+  terrainRoll: null,
   inventory: { "Meal Bar": 3 },
   activeBody: [],
   techSkills: {},
@@ -125,6 +133,16 @@ function normalizeMapHexes(raw: unknown): Record<string, HexInfo> {
   return out;
 }
 
+function normalizeTerrainRoll(raw: unknown): TerrainRollState {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { day?: unknown; hex?: unknown; result?: unknown };
+  const result = Math.floor(Number(r.result));
+  const day = Math.floor(Number(r.day));
+  const hex = typeof r.hex === "string" ? r.hex.trim().toUpperCase() : "";
+  if (result < 1 || result > 6 || day < 1 || !/^[A-G]-\d{2}$/.test(hex)) return null;
+  return { day: clamp(day,1,66), hex, result };
+}
+
 function normalizeCombat(raw: unknown): CombatState {
   const r = (raw && typeof raw === "object" ? raw : {}) as Partial<CombatState>;
   const maxHp = clamp(Math.floor(Number(r.enemyMaxHp ?? 10)) || 10, 1, 999);
@@ -160,7 +178,7 @@ export function normalizeState(raw: unknown): MiruState {
 
   return {
     ...DEFAULT_STATE,
-    version: 4,
+    version: 5,
     step,
     hp: clamp(Number(r.hp ?? DEFAULT_STATE.hp), 0, 20),
     ep: clamp(Number(r.ep ?? DEFAULT_STATE.ep), 0, 20),
@@ -171,6 +189,7 @@ export function normalizeState(raw: unknown): MiruState {
     minorInjuries: clamp(Math.floor(Number(r.minorInjuries ?? 0)), 0, 3),
     currentHex: typeof r.currentHex === "string" && r.currentHex.trim() ? r.currentHex.trim().toUpperCase() : "G-10",
     mapHexes: normalizeMapHexes(r.mapHexes),
+    terrainRoll: normalizeTerrainRoll(r.terrainRoll),
     inventory,
     activeBody: Array.isArray(r.activeBody)
       ? [...new Set(r.activeBody.filter((x): x is string => typeof x === "string" && x.trim().length > 0))].slice(0, 5)
@@ -187,7 +206,6 @@ export async function loadState(): Promise<MiruState> {
   const roomState = roomMetadata[META_KEY];
   if (roomState) return normalizeState(roomState);
 
-  // One-time migration from the older scene-scoped save so existing campaigns are not lost.
   if (await OBR.scene.isReady()) {
     const sceneMetadata = await OBR.scene.getMetadata();
     const legacyState = sceneMetadata[META_KEY];
