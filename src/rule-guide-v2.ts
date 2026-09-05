@@ -112,7 +112,6 @@ function render(){
     if(out)out.textContent=c.roll[0]===1?String(r.total):`${r.d.join(" + ")} = ${r.total}`;
     if(shownStep==="G"){
       state={...state,terrainRoll:{day:state.day,hex:state.currentHex,result:r.total,applied:false}};
-      void saveState(state);
       const action=sec.querySelector<HTMLElement>("#guide-roll-action");
       if(action){
         if(r.total===1){
