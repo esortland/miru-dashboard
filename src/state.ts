@@ -26,6 +26,13 @@ export type ArrivalState = {
   kind: "new" | "old";
 } | null;
 
+export type SuppliesState = {
+  Fruit: number;
+  "Meal Bar": number;
+  Bits: number;
+  Arrows: number;
+};
+
 export type CombatState = {
   active: boolean;
   enemyName: string;
@@ -47,7 +54,7 @@ export type CombatState = {
 };
 
 export type MiruState = {
-  version: 6;
+  version: 7;
   day: number;
   step: Step;
   hp: number;
@@ -60,8 +67,11 @@ export type MiruState = {
   mapHexes: Record<string, HexInfo>;
   terrainRoll: TerrainRollState;
   arrival: ArrivalState;
+  supplies: SuppliesState;
   inventory: Record<string, number>;
   activeBody: string[];
+  mask: string | null;
+  tools: string[];
   techSkills: Record<string, number>;
   techUsedDay: Record<string, number>;
   combat: CombatState;
@@ -89,7 +99,7 @@ export const DEFAULT_COMBAT: CombatState = {
 };
 
 export const DEFAULT_STATE: MiruState = {
-  version: 6,
+  version: 7,
   day: 1,
   step: "G",
   hp: 10,
@@ -102,8 +112,11 @@ export const DEFAULT_STATE: MiruState = {
   mapHexes: { "G-10": { explored: true, visits: 1 } },
   terrainRoll: null,
   arrival: null,
-  inventory: { "Meal Bar": 3 },
+  supplies: { Fruit: 0, "Meal Bar": 3, Bits: 0, Arrows: 0 },
+  inventory: {},
   activeBody: [],
+  mask: null,
+  tools: [],
   techSkills: {},
   techUsedDay: {},
   combat: structuredClone(DEFAULT_COMBAT),
@@ -190,16 +203,52 @@ function normalizeCombat(raw: unknown): CombatState {
   };
 }
 
+function normalizeSupplies(raw: unknown, legacyInventory: Record<string, number>): SuppliesState {
+  const r = raw && typeof raw === "object" ? raw as Partial<SuppliesState> : {};
+  const pick = (key: keyof SuppliesState, fallback = 0) => clamp(Math.floor(Number(r[key] ?? legacyInventory[key] ?? fallback)) || 0, 0, 999);
+  return {
+    Fruit: pick("Fruit"),
+    "Meal Bar": pick("Meal Bar", 3),
+    Bits: pick("Bits"),
+    Arrows: pick("Arrows")
+  };
+}
+
 export function normalizeState(raw: unknown): MiruState {
   const r = (raw && typeof raw === "object" ? raw : {}) as Partial<MiruState> & { playerTokenId?: unknown };
   const validSteps: Step[] = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P"];
   const step = validSteps.includes(r.step as Step) ? (r.step as Step) : DEFAULT_STATE.step;
-  const inventory = normalizeRecord(r.inventory);
-  if (Object.keys(inventory).length === 0 && !r.inventory) inventory["Meal Bar"] = 3;
+  const legacyInventory = normalizeRecord(r.inventory);
+  const supplies = normalizeSupplies(r.supplies, legacyInventory);
+  const inventory = { ...legacyInventory };
+  delete inventory.Fruit;
+  delete inventory["Meal Bar"];
+  delete inventory.Bits;
+  delete inventory.Arrows;
+
+  let mask = typeof r.mask === "string" && r.mask.trim() ? r.mask.trim().slice(0,48) : null;
+  if (!mask && inventory["Cyclops Mask"]) {
+    mask = "Cyclops Mask";
+    delete inventory["Cyclops Mask"];
+  }
+
+  const tools = Array.isArray(r.tools)
+    ? [...new Set(r.tools.filter((x): x is string => typeof x === "string" && x.trim().length > 0))].slice(0,10)
+    : [];
+  for (const toolName of ["Solar Light", "Solar Taser"]) {
+    if (inventory[toolName] && !tools.includes(toolName)) tools.push(toolName);
+    delete inventory[toolName];
+  }
+
+  const activeBody = Array.isArray(r.activeBody)
+    ? [...new Set(r.activeBody.filter((x): x is string => typeof x === "string" && x.trim().length > 0))]
+      .filter(x => !["Fruit","Meal Bar","Bits","Arrows","Cyclops Mask","Solar Light","Solar Taser"].includes(x))
+      .slice(0,5)
+    : [];
 
   return {
     ...DEFAULT_STATE,
-    version: 6,
+    version: 7,
     step,
     hp: clamp(Number(r.hp ?? DEFAULT_STATE.hp), 0, 20),
     ep: clamp(Number(r.ep ?? DEFAULT_STATE.ep), 0, 20),
@@ -212,14 +261,15 @@ export function normalizeState(raw: unknown): MiruState {
     mapHexes: normalizeMapHexes(r.mapHexes),
     terrainRoll: normalizeTerrainRoll(r.terrainRoll),
     arrival: normalizeArrival(r.arrival),
+    supplies,
     inventory,
-    activeBody: Array.isArray(r.activeBody)
-      ? [...new Set(r.activeBody.filter((x): x is string => typeof x === "string" && x.trim().length > 0))].slice(0, 5)
-      : [],
+    activeBody,
+    mask,
+    tools,
     techSkills: normalizeRecord(r.techSkills),
     techUsedDay: normalizeRecord(r.techUsedDay),
     combat: normalizeCombat(r.combat),
-    notes: typeof r.notes === "string" ? r.notes.slice(0, 2000) : ""
+    notes: typeof r.notes === "string" ? r.notes.slice(0,4000) : ""
   };
 }
 
