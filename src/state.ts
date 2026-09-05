@@ -4,6 +4,14 @@ export const META_KEY = "com.esortland.miru-companion/state";
 
 export type Step = "A"|"B"|"C"|"D"|"E"|"F"|"G"|"H"|"I"|"J"|"K"|"L"|"M"|"N"|"O"|"P";
 
+export type HexInfo = {
+  explored?: boolean;
+  terrain?: string;
+  icon?: string;
+  note?: string;
+  visits?: number;
+};
+
 export type CombatState = {
   active: boolean;
   enemyName: string;
@@ -25,7 +33,7 @@ export type CombatState = {
 };
 
 export type MiruState = {
-  version: 3;
+  version: 4;
   day: number;
   step: Step;
   hp: number;
@@ -35,11 +43,11 @@ export type MiruState = {
   sleepDeprivation: number;
   minorInjuries: number;
   currentHex: string;
+  mapHexes: Record<string, HexInfo>;
   inventory: Record<string, number>;
   activeBody: string[];
   techSkills: Record<string, number>;
   techUsedDay: Record<string, number>;
-  playerTokenId: string;
   combat: CombatState;
   notes: string;
 };
@@ -65,7 +73,7 @@ export const DEFAULT_COMBAT: CombatState = {
 };
 
 export const DEFAULT_STATE: MiruState = {
-  version: 3,
+  version: 4,
   day: 1,
   step: "G",
   hp: 10,
@@ -75,11 +83,11 @@ export const DEFAULT_STATE: MiruState = {
   sleepDeprivation: 0,
   minorInjuries: 0,
   currentHex: "G-10",
+  mapHexes: { "G-10": { explored: true, visits: 1 } },
   inventory: { "Meal Bar": 3 },
   activeBody: [],
   techSkills: {},
   techUsedDay: {},
-  playerTokenId: "",
   combat: structuredClone(DEFAULT_COMBAT),
   notes: ""
 };
@@ -95,6 +103,25 @@ function normalizeRecord(raw: unknown): Record<string, number> {
     const count = Math.max(0, Math.floor(Number(value)) || 0);
     if (count > 0) out[key] = count;
   }
+  return out;
+}
+
+function normalizeMapHexes(raw: unknown): Record<string, HexInfo> {
+  const out: Record<string, HexInfo> = {};
+  if (raw && typeof raw === "object") {
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (!/^[A-G]-\d{2}$/.test(key) || !value || typeof value !== "object") continue;
+      const h = value as HexInfo;
+      out[key] = {
+        explored: Boolean(h.explored),
+        terrain: typeof h.terrain === "string" ? h.terrain.slice(0, 32) : undefined,
+        icon: typeof h.icon === "string" ? h.icon.slice(0, 32) : undefined,
+        note: typeof h.note === "string" ? h.note.slice(0, 160) : undefined,
+        visits: clamp(Math.floor(Number(h.visits ?? 0)), 0, 999)
+      };
+    }
+  }
+  out["G-10"] ??= { explored: true, visits: 1 };
   return out;
 }
 
@@ -125,7 +152,7 @@ function normalizeCombat(raw: unknown): CombatState {
 }
 
 function normalize(raw: unknown): MiruState {
-  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<MiruState>;
+  const r = (raw && typeof raw === "object" ? raw : {}) as Partial<MiruState> & { playerTokenId?: unknown };
   const validSteps: Step[] = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P"];
   const step = validSteps.includes(r.step as Step) ? (r.step as Step) : DEFAULT_STATE.step;
   const inventory = normalizeRecord(r.inventory);
@@ -133,8 +160,7 @@ function normalize(raw: unknown): MiruState {
 
   return {
     ...DEFAULT_STATE,
-    ...r,
-    version: 3,
+    version: 4,
     step,
     hp: clamp(Number(r.hp ?? DEFAULT_STATE.hp), 0, 20),
     ep: clamp(Number(r.ep ?? DEFAULT_STATE.ep), 0, 20),
@@ -143,26 +169,38 @@ function normalize(raw: unknown): MiruState {
     poison: clamp(Math.floor(Number(r.poison ?? 0)), 0, 8),
     sleepDeprivation: clamp(Math.floor(Number(r.sleepDeprivation ?? 0)), 0, 5),
     minorInjuries: clamp(Math.floor(Number(r.minorInjuries ?? 0)), 0, 3),
+    currentHex: typeof r.currentHex === "string" && r.currentHex.trim() ? r.currentHex.trim().toUpperCase() : "G-10",
+    mapHexes: normalizeMapHexes(r.mapHexes),
     inventory,
     activeBody: Array.isArray(r.activeBody)
       ? [...new Set(r.activeBody.filter((x): x is string => typeof x === "string" && x.trim().length > 0))].slice(0, 5)
       : [],
     techSkills: normalizeRecord(r.techSkills),
     techUsedDay: normalizeRecord(r.techUsedDay),
-    playerTokenId: typeof r.playerTokenId === "string" ? r.playerTokenId : "",
     combat: normalizeCombat(r.combat),
-    notes: typeof r.notes === "string" ? r.notes : "",
-    currentHex: typeof r.currentHex === "string" && r.currentHex.trim() ? r.currentHex.trim().toUpperCase() : "G-10"
+    notes: typeof r.notes === "string" ? r.notes.slice(0, 2000) : ""
   };
 }
 
 export async function loadState(): Promise<MiruState> {
-  if (!(await OBR.scene.isReady())) return structuredClone(DEFAULT_STATE);
-  const metadata = await OBR.scene.getMetadata();
-  return normalize(metadata[META_KEY]);
+  const roomMetadata = await OBR.room.getMetadata();
+  const roomState = roomMetadata[META_KEY];
+  if (roomState) return normalize(roomState);
+
+  // One-time migration from the older scene-scoped save so existing campaigns are not lost.
+  if (await OBR.scene.isReady()) {
+    const sceneMetadata = await OBR.scene.getMetadata();
+    const legacyState = sceneMetadata[META_KEY];
+    if (legacyState) {
+      const migrated = normalize(legacyState);
+      await OBR.room.setMetadata({ [META_KEY]: migrated });
+      return migrated;
+    }
+  }
+
+  return structuredClone(DEFAULT_STATE);
 }
 
 export async function saveState(state: MiruState): Promise<void> {
-  if (!(await OBR.scene.isReady())) return;
-  await OBR.scene.setMetadata({ [META_KEY]: state });
+  await OBR.room.setMetadata({ [META_KEY]: normalize(state) });
 }
