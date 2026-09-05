@@ -16,6 +16,7 @@ export type TerrainRollState = {
   day: number;
   hex: string;
   result: number;
+  applied: boolean;
 } | null;
 
 export type CombatState = {
@@ -135,12 +136,12 @@ function normalizeMapHexes(raw: unknown): Record<string, HexInfo> {
 
 function normalizeTerrainRoll(raw: unknown): TerrainRollState {
   if (!raw || typeof raw !== "object") return null;
-  const r = raw as { day?: unknown; hex?: unknown; result?: unknown };
+  const r = raw as { day?: unknown; hex?: unknown; result?: unknown; applied?: unknown };
   const result = Math.floor(Number(r.result));
   const day = Math.floor(Number(r.day));
   const hex = typeof r.hex === "string" ? r.hex.trim().toUpperCase() : "";
   if (result < 1 || result > 6 || day < 1 || !/^[A-G]-\d{2}$/.test(hex)) return null;
-  return { day: clamp(day,1,66), hex, result };
+  return { day: clamp(day,1,66), hex, result, applied: Boolean(r.applied) };
 }
 
 function normalizeCombat(raw: unknown): CombatState {
