@@ -21,7 +21,6 @@ const techSkills = [
 ] as const;
 
 let state: MiruState = structuredClone(DEFAULT_STATE);
-let ready = false;
 let saveTimer: number | undefined;
 
 function phase(step: Step) {
@@ -122,7 +121,6 @@ function combatHtml() {
 function render() {
   app.innerHTML = `
     <header class="hero"><div><div class="eyebrow">MIRU // FIELD CONTROL</div><h1>DAY ${String(state.day).padStart(2,"0")} <span>${phase(state.step)}</span></h1></div><div class="hex">${escapeHtml(state.currentHex)}</div></header>
-    ${!ready ? `<div class="notice">Open a scene in Owlbear Rodeo to persist MIRU campaign state.</div>` : ""}
 
     <section class="vitals">${meter("HP","hp",state.hp)}${meter("EP","ep",state.ep)}</section>
 
@@ -159,8 +157,8 @@ function render() {
     </section>
 
     <section>
-      <div class="section-title"><span>CAMPAIGN NOTES</span><small>saved with scene</small></div>
-      <textarea id="notes" rows="4" placeholder="Objective, unresolved quest, session notes…">${escapeHtml(state.notes)}</textarea>
+      <div class="section-title"><span>CAMPAIGN NOTES</span><small>saved with room</small></div>
+      <textarea id="notes" rows="4" maxlength="2000" placeholder="Objective, unresolved quest, session notes…">${escapeHtml(state.notes)}</textarea>
     </section>
 
     <details><summary>Campaign controls</summary><div class="campaign-controls"><button id="reset-combat">Reset combat card</button><button id="reset">Reset MIRU state</button></div></details>
@@ -248,16 +246,21 @@ function wire() {
   app.querySelectorAll<HTMLButtonElement>("[data-tech-attack]").forEach(btn=>btn.addEventListener("click",()=>replaceState(techAttack(state,btn.dataset.techAttack as TrainedTechKey))));
   document.querySelector<HTMLButtonElement>("#clear-combat-log")?.addEventListener("click",()=>replaceState(resetCombatLog(state)));
 
-  const notes=document.querySelector<HTMLTextAreaElement>("#notes");notes?.addEventListener("input",()=>{state={...state,notes:notes.value};scheduleSave();});
+  const notes=document.querySelector<HTMLTextAreaElement>("#notes");
+  notes?.addEventListener("input",()=>{state={...state,notes:notes.value.slice(0,2000)};scheduleSave();});
   document.querySelector<HTMLButtonElement>("#reset-combat")?.addEventListener("click",()=>setState({combat:structuredClone(DEFAULT_COMBAT)}));
-  document.querySelector<HTMLButtonElement>("#reset")?.addEventListener("click",async()=>{if(confirm("Reset all MIRU Companion campaign state for this scene?")){state=structuredClone(DEFAULT_STATE);await saveState(state);render();}});
+  document.querySelector<HTMLButtonElement>("#reset")?.addEventListener("click",async()=>{if(confirm("Reset all MIRU Companion campaign state for this Owlbear room?")){state=structuredClone(DEFAULT_STATE);await saveState(state);render();}});
 }
 
 async function boot() {
   await OBR.onReady(async()=>{
-    ready=await OBR.scene.isReady();if(ready)state=await loadState();render();
-    OBR.scene.onReadyChange(async r=>{ready=r;if(r)state=await loadState();render();});
-    OBR.scene.onMetadataChange(meta=>{if(meta["com.esortland.miru-companion/state"]){void loadState().then(s=>{state=s;render();});}});
+    state=await loadState();
+    render();
+    OBR.room.onMetadataChange(meta=>{
+      if(meta["com.esortland.miru-companion/state"]){
+        void loadState().then(s=>{state=s;render();});
+      }
+    });
   });
 }
 
