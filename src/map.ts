@@ -4,7 +4,7 @@ import { loadState, saveState, MiruState } from "./state";
 
 const app = document.querySelector<HTMLDivElement>("#map-app")!;
 const ROWS = ["A","B","C","D","E","F","G"] as const;
-const TERRAIN = ["Unknown","Forest","Mountain","Grassland","Desert","Swamp"] as const;
+const TERRAIN = ["Forest","Mountain","Grassland","Desert","Swamp"] as const;
 const ICONS = ["None","Village","Quest","Treasure","Enemy","Radio Tower","Power Supply","Camp"] as const;
 
 const SHEET_W = 820;
@@ -17,7 +17,7 @@ const ODD_ROW_FIRST_CENTER_X = 101;
 const FIRST_ROW_CENTER_Y = 105;
 
 type HexInfo = { explored?: boolean; terrain?: string; icon?: string; note?: string; visits?: number };
-type MapState = MiruState & { mapHexes?: Record<string, HexInfo> };
+type MapState = MiruState;
 let state: MapState;
 let selected = "G-10";
 
@@ -33,7 +33,7 @@ function adjacent(a:string,b:string){
   return Math.abs(x.r-y.r)===1 && Math.abs(x.c-y.c)===1;
 }
 function esc(s:string){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!))}
-function info(hex:string){return state.mapHexes?.[hex] ?? {}}
+function info(hex:string):HexInfo{return state.mapHexes?.[hex] ?? {}}
 async function persist(){await saveState(state)}
 function ensureMap(){state.mapHexes ??= {}; state.mapHexes["G-10"] ??= {explored:true,visits:1}}
 
@@ -61,7 +61,8 @@ function symbolBody(name:string){
 }
 
 function terrainButtons(value:string|undefined){
-  return TERRAIN.map(t=>`<button class="choice terrain-choice ${value===t?"active":""}" data-terrain-choice="${t}">${t!=="Unknown"?symbol(t,"choice-symbol"):""}<span>${t}</span></button>`).join("");
+  const unrecorded = `<button class="choice terrain-choice ${!value||value==="Unknown"?"active":""}" data-clear-terrain="true"><span>Unrecorded</span></button>`;
+  return unrecorded + TERRAIN.map(t=>`<button class="choice terrain-choice ${value===t?"active":""}" data-terrain-choice="${t}">${symbol(t,"choice-symbol")}<span>${t}</span></button>`).join("");
 }
 function iconButtons(value:string|undefined){
   return ICONS.map(t=>`<button class="choice icon-choice ${value===t?"active":""}" data-icon-choice="${t}">${t!=="None"?symbol(t,"choice-symbol"):""}<span>${t}</span></button>`).join("");
@@ -128,7 +129,7 @@ function render(){
       <div class="control-block"><div class="control-label">MAP ICON</div><div class="choice-grid icon-grid">${iconButtons(selectedInfo.icon)}</div></div>
       <div class="control-block"><div class="control-label">FIELD NOTE</div><textarea id="hex-note" rows="4" placeholder="Enemy left behind, quest clue, landmark…">${esc(selectedInfo.note??"")}</textarea></div>
       <button id="move" class="move" ${canMove?"":"disabled"}>${canMove?`MOVE TO ${selected}`:selected===state.currentHex?"YOU ARE HERE":"SELECT AN ADJACENT HEX"}</button>
-      <p class="hint">Visited hexes remain visibly marked. Movement is limited to adjacent spaces and saves with the Owlbear scene.</p>
+      <p class="hint">Visited hexes remain visibly marked. Movement is limited to adjacent spaces and the campaign saves with this Owlbear room.</p>
     </aside>
   </main></div>`;
 
@@ -148,23 +149,37 @@ function wire(){
   document.querySelectorAll<SVGGElement>("[data-hex]").forEach(el=>el.addEventListener("click",()=>{selected=el.dataset.hex!;render()}));
   document.querySelector("#close-map")?.addEventListener("click",()=>void OBR.modal.close("com.esortland.miru-companion/map"));
 
-  document.querySelector("#mark-explored")?.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes![selected]={...info(selected),explored:true}; await persist(); render()})());
-  document.querySelector("#mark-unseen")?.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes![selected]={...info(selected),explored:false}; await persist(); render()})());
-  document.querySelectorAll<HTMLButtonElement>("[data-terrain-choice]").forEach(button=>button.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes![selected]={...info(selected),terrain:button.dataset.terrainChoice}; await persist(); render()})()));
-  document.querySelectorAll<HTMLButtonElement>("[data-icon-choice]").forEach(button=>button.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes![selected]={...info(selected),icon:button.dataset.iconChoice}; await persist(); render()})()));
-  document.querySelector("#hex-note")?.addEventListener("change",event=>void (async()=>{ensureMap(); state.mapHexes![selected]={...info(selected),note:(event.target as HTMLTextAreaElement).value}; await persist()})());
+  document.querySelector("#mark-explored")?.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes[selected]={...info(selected),explored:true}; await persist(); render()})());
+  document.querySelector("#mark-unseen")?.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes[selected]={...info(selected),explored:false}; await persist(); render()})());
+  document.querySelectorAll<HTMLButtonElement>("[data-terrain-choice]").forEach(button=>button.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes[selected]={...info(selected),terrain:button.dataset.terrainChoice}; await persist(); render()})()));
+  document.querySelector<HTMLButtonElement>("[data-clear-terrain]")?.addEventListener("click",()=>void (async()=>{ensureMap(); const next={...info(selected)}; delete next.terrain; state.mapHexes[selected]=next; await persist(); render()})());
+  document.querySelectorAll<HTMLButtonElement>("[data-icon-choice]").forEach(button=>button.addEventListener("click",()=>void (async()=>{ensureMap(); state.mapHexes[selected]={...info(selected),icon:button.dataset.iconChoice}; await persist(); render()})()));
+  document.querySelector("#hex-note")?.addEventListener("change",event=>void (async()=>{ensureMap(); state.mapHexes[selected]={...info(selected),note:(event.target as HTMLTextAreaElement).value}; await persist()})());
   document.querySelector("#move")?.addEventListener("click",()=>void (async()=>{
     if(!adjacent(state.currentHex,selected))return;
     ensureMap();
     const prior=state.currentHex;
-    state.mapHexes![prior]={...info(prior),explored:true,visits:Math.max(1,info(prior).visits??1)};
-    state.currentHex=selected;
-    state.mapHexes![selected]={...info(selected),explored:true,visits:(info(selected).visits??0)+1};
+    const destinationBefore={...info(selected)};
+    const hasIcon=Boolean(destinationBefore.icon && destinationBefore.icon!=="None");
+    const wasKnown=Boolean(destinationBefore.explored) || (destinationBefore.visits??0)>0 || hasIcon;
+    const kind:"new"|"old"=wasKnown?"old":"new";
+    const nextStep=kind==="new"?"G":hasIcon?"J":"K";
+    const mapHexes={...state.mapHexes};
+    mapHexes[prior]={...info(prior),explored:true,visits:Math.max(1,info(prior).visits??1)};
+    mapHexes[selected]={...destinationBefore,explored:true,visits:(destinationBefore.visits??0)+1};
+    state={...state,currentHex:selected,mapHexes,terrainRoll:null,arrival:{day:state.day,from:prior,hex:selected,kind},step:nextStep};
     await persist(); render();
   })());
 }
 
 OBR.onReady(async()=>{
   state=await loadState() as MapState; ensureMap(); selected=state.currentHex; render();
-  OBR.scene.onMetadataChange(async()=>{const fresh=await loadState() as MapState; state=fresh; ensureMap(); render()});
+  OBR.room.onMetadataChange(async meta=>{
+    if(!meta["com.esortland.miru-companion/state"])return;
+    const oldCurrent=state.currentHex;
+    const fresh=await loadState() as MapState;
+    state=fresh; ensureMap();
+    if(fresh.currentHex!==oldCurrent) selected=fresh.currentHex;
+    render();
+  });
 });

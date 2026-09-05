@@ -19,6 +19,13 @@ export type TerrainRollState = {
   applied: boolean;
 } | null;
 
+export type ArrivalState = {
+  day: number;
+  from: string;
+  hex: string;
+  kind: "new" | "old";
+} | null;
+
 export type CombatState = {
   active: boolean;
   enemyName: string;
@@ -40,7 +47,7 @@ export type CombatState = {
 };
 
 export type MiruState = {
-  version: 5;
+  version: 6;
   day: number;
   step: Step;
   hp: number;
@@ -52,6 +59,7 @@ export type MiruState = {
   currentHex: string;
   mapHexes: Record<string, HexInfo>;
   terrainRoll: TerrainRollState;
+  arrival: ArrivalState;
   inventory: Record<string, number>;
   activeBody: string[];
   techSkills: Record<string, number>;
@@ -81,7 +89,7 @@ export const DEFAULT_COMBAT: CombatState = {
 };
 
 export const DEFAULT_STATE: MiruState = {
-  version: 5,
+  version: 6,
   day: 1,
   step: "G",
   hp: 10,
@@ -93,6 +101,7 @@ export const DEFAULT_STATE: MiruState = {
   currentHex: "G-10",
   mapHexes: { "G-10": { explored: true, visits: 1 } },
   terrainRoll: null,
+  arrival: null,
   inventory: { "Meal Bar": 3 },
   activeBody: [],
   techSkills: {},
@@ -144,6 +153,17 @@ function normalizeTerrainRoll(raw: unknown): TerrainRollState {
   return { day: clamp(day,1,66), hex, result, applied: Boolean(r.applied) };
 }
 
+function normalizeArrival(raw: unknown): ArrivalState {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { day?: unknown; from?: unknown; hex?: unknown; kind?: unknown };
+  const day = Math.floor(Number(r.day));
+  const from = typeof r.from === "string" ? r.from.trim().toUpperCase() : "";
+  const hex = typeof r.hex === "string" ? r.hex.trim().toUpperCase() : "";
+  const kind = r.kind === "new" || r.kind === "old" ? r.kind : null;
+  if (day < 1 || !/^[A-G]-\d{2}$/.test(from) || !/^[A-G]-\d{2}$/.test(hex) || !kind) return null;
+  return { day: clamp(day,1,66), from, hex, kind };
+}
+
 function normalizeCombat(raw: unknown): CombatState {
   const r = (raw && typeof raw === "object" ? raw : {}) as Partial<CombatState>;
   const maxHp = clamp(Math.floor(Number(r.enemyMaxHp ?? 10)) || 10, 1, 999);
@@ -179,7 +199,7 @@ export function normalizeState(raw: unknown): MiruState {
 
   return {
     ...DEFAULT_STATE,
-    version: 5,
+    version: 6,
     step,
     hp: clamp(Number(r.hp ?? DEFAULT_STATE.hp), 0, 20),
     ep: clamp(Number(r.ep ?? DEFAULT_STATE.ep), 0, 20),
@@ -191,6 +211,7 @@ export function normalizeState(raw: unknown): MiruState {
     currentHex: typeof r.currentHex === "string" && r.currentHex.trim() ? r.currentHex.trim().toUpperCase() : "G-10",
     mapHexes: normalizeMapHexes(r.mapHexes),
     terrainRoll: normalizeTerrainRoll(r.terrainRoll),
+    arrival: normalizeArrival(r.arrival),
     inventory,
     activeBody: Array.isArray(r.activeBody)
       ? [...new Set(r.activeBody.filter((x): x is string => typeof x === "string" && x.trim().length > 0))].slice(0, 5)
