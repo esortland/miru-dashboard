@@ -28,16 +28,33 @@ function info(hex:string){return state.mapHexes?.[hex] ?? {}}
 async function persist(){await saveState(state)}
 function ensureMap(){state.mapHexes ??= {}; state.mapHexes["G-10"] ??= {explored:true,visits:1}}
 
+function symbol(name:string, cls="map-symbol"){
+  const wrap=(body:string)=>`<svg class="${cls}" viewBox="-16 -16 32 32" aria-hidden="true">${body}</svg>`;
+  switch(name){
+    case "Forest": return wrap(`<path d="M-10 10L-4-2L2 10M-2 10L5-6L12 10"/><path d="M-4 10V14M5 10V14"/>`);
+    case "Mountain": return wrap(`<path d="M-14 11L-5-5L1 5L6-3L14 11"/><path d="M-8 1L-5-5L-1 2M3 2L6-3L9 2"/>`);
+    case "Grassland": return wrap(`<path d="M-12 12Q-10 3-7-2M-5 12Q-4 1 0-6M2 12Q4 4 8-1M8 12Q10 6 13 4"/>`);
+    case "Desert": return wrap(`<circle cx="8" cy="-7" r="3"/><path d="M-14 8Q-7 2 0 8T14 8M-12 13Q-5 8 2 13T14 13"/>`);
+    case "Swamp": return wrap(`<path d="M-14 3Q-10-1-6 3T2 3T10 3T18 3M-14 9Q-10 5-6 9T2 9T10 9T18 9"/><path d="M-7 1V-8M7 1V-6M-10-5L-7-8L-4-5M4-3L7-6L10-3"/>`);
+    case "Village": return wrap(`<path d="M-13 12V1L-7-5L-1 1V12M1 12V-2L7-8L13-2V12M-10 12V6H-5V12M5 12V5H10V12"/>`);
+    case "Quest": return wrap(`<path d="M-9 12V-10M-9-9H8L3-3L8 3H-9"/><circle cx="-9" cy="12" r="1.5"/>`);
+    case "Treasure": return wrap(`<path d="M-11-7L11 9M11-7L-11 9"/><circle cx="0" cy="1" r="12"/>`);
+    case "Enemy": return wrap(`<path d="M-10 7V-1Q-10-11 0-11Q10-11 10-1V7L5 12L0 8L-5 12Z"/><circle cx="-4" cy="-2" r="2"/><circle cx="4" cy="-2" r="2"/><path d="M-4 5H4"/>`);
+    case "Radio Tower": return wrap(`<path d="M0-12L-7 13M0-12L7 13M-5 7H5M-3 1H3"/><path d="M-7-9Q-13-4-7 1M7-9Q13-4 7 1"/>`);
+    case "Power Supply": return wrap(`<rect x="-11" y="-10" width="22" height="20" rx="2"/><path d="M2-8L-5 2H0L-3 9L7-3H2Z"/>`);
+    case "Camp": return wrap(`<path d="M-13 11L0-10L13 11ZM0-10V11M-5 11L0 2L5 11"/>`);
+    default: return "";
+  }
+}
+
 function terrainButtons(value:string|undefined){
-  return TERRAIN.map(t=>`<button class="choice terrain-choice ${value===t?"active":""}" data-terrain-choice="${t}">${t}</button>`).join("");
+  return TERRAIN.map(t=>`<button class="choice terrain-choice ${value===t?"active":""}" data-terrain-choice="${t}">${t!=="Unknown"?symbol(t,"choice-symbol"):""}<span>${t}</span></button>`).join("");
 }
 function iconButtons(value:string|undefined){
-  return ICONS.map(t=>`<button class="choice icon-choice ${value===t?"active":""}" data-icon-choice="${t}">${t}</button>`).join("");
+  return ICONS.map(t=>`<button class="choice icon-choice ${value===t?"active":""}" data-icon-choice="${t}">${t!=="None"?symbol(t,"choice-symbol"):""}<span>${t}</span></button>`).join("");
 }
 
 function render(){
-  // The map UI is rebuilt on selection/state changes. Preserve the scroll viewport
-  // so tapping a hex on a horizontally scrolled iPad map doesn't jump back left.
   const previousBoard = app.querySelector<HTMLElement>(".map-board");
   const previousScrollLeft = previousBoard?.scrollLeft ?? 0;
   const previousScrollTop = previousBoard?.scrollTop ?? 0;
@@ -47,22 +64,31 @@ function render(){
   const selectedInfo=info(selected); const canMove=selected!==state.currentHex && adjacent(state.currentHex,selected);
   const cells=hexes.map(h=>{
     const p=parse(h)!; const hi=info(h); const current=h===state.currentHex; const sel=h===selected; const visited=(hi.visits??0)>0 || hi.explored;
-    const x=68 + ((p.c-1)/2)*108 + (p.r%2===0?54:0); const y=62+p.r*94;
+    // Match the printed MIRU map more closely: compact, nearly touching pointy hexes.
+    // Each numeric column is half a hex-width so alternating rows interlock naturally.
+    const x=78 + (p.c-1)*38; const y=80+p.r*66;
     const terrain=(hi.terrain && hi.terrain!=="Unknown")?hi.terrain:""; const icon=hi.icon&&hi.icon!=="None"?hi.icon:"";
-    const pts="0,-43 38,-21.5 38,21.5 0,43 -38,21.5 -38,-21.5";
-    return `<g class="map-hex ${visited?"visited":""} ${hi.explored?"explored":""} ${current?"current":""} ${sel?"selected":""}" data-hex="${h}" transform="translate(${x} ${y})">
+    const pts="0,-44 38,-22 38,22 0,44 -38,22 -38,-22";
+    return `<g class="map-hex ${visited?"visited":""} ${hi.explored?"explored":""} ${current?"current":""} ${sel?"selected":""}" data-hex="${h}" transform="translate(${x} ${y})" aria-label="${h}">
       <polygon points="${pts}"></polygon>
-      ${visited?`<circle class="visit-mark" cx="0" cy="-30" r="3"></circle>`:""}
-      <text class="hex-id" y="4">${h}</text>
-      ${terrain?`<text class="terrain" y="20">${esc(terrain)}</text>`:""}
-      ${icon?`<text class="icon" y="-18">${esc(icon)}</text>`:""}
+      ${terrain?`<g class="terrain-glyph" transform="translate(0 4) scale(.86)">${symbol(terrain,"cell-symbol")}</g>`:""}
+      ${icon?`<g class="icon-glyph" transform="translate(0 -15) scale(.62)">${symbol(icon,"cell-symbol")}</g>`:""}
+      ${(visited||current||sel)?`<text class="hex-id" y="31">${h}</text>`:""}
+      ${visited?`<circle class="visit-mark" cx="0" cy="-32" r="2.7"></circle>`:""}
     </g>`;
   }).join("");
+
+  const columnAxis=Array.from({length:17},(_,i)=>i+1).map(c=>`<text class="axis axis-col" x="${78+(c-1)*38}" y="22">${String(c).padStart(2,"0")}</text>`).join("");
+  const rowAxis=ROWS.map((r,i)=>`<text class="axis axis-row" x="25" y="${84+i*66}">${r}</text>`).join("");
 
   app.innerHTML=`<div class="map-shell">
   <header><div><div class="eyebrow">MIRU // INTERACTIVE MAP</div><h1>EXPLORE</h1></div><div class="position">CURRENT <b>${state.currentHex}</b></div><button id="close-map">Close map</button></header>
   <main>
-    <section class="map-board"><svg viewBox="0 0 1030 690" role="img" aria-label="Interactive MIRU hex map"><text class="north" x="955" y="650">N ↑</text>${cells}</svg></section>
+    <section class="map-board"><svg viewBox="0 0 770 535" role="img" aria-label="Interactive MIRU hex map">
+      <g class="map-axis">${columnAxis}${rowAxis}</g>
+      <g class="north-mark"><text x="25" y="18">N</text><path d="M25 55V28M19 35L25 28L31 35"/></g>
+      <g class="hex-grid">${cells}</g>
+    </svg></section>
     <aside>
       <div class="hex-title"><span>SELECTED HEX</span><b>${selected}</b></div>
       <div class="state-strip">
