@@ -1,5 +1,5 @@
 import OBR from "@owlbear-rodeo/sdk";
-import { loadState, MiruState } from "./state";
+import { loadState, MiruState, saveState } from "./state";
 import { itemDefinition, ItemShape } from "./item-catalog";
 import "./active-body-layout.css";
 
@@ -68,6 +68,13 @@ function slotHtml(index:number,name:string|null){
   </div>`;
 }
 
+async function removeFromBody(name:string){
+  if(!state)return;
+  state={...state,activeBody:state.activeBody.filter(x=>x!==name)};
+  patch();
+  await saveState(state);
+}
+
 function patchActiveBody(){
   if(!state)return;
   const panel=document.querySelector<HTMLElement>(".body-paper");
@@ -78,10 +85,7 @@ function patchActiveBody(){
     <div class="body-slot-board">${slots.map((name,i)=>slotHtml(i,name)).join("")}</div>`;
 
   panel.querySelectorAll<HTMLButtonElement>("[data-body-remove]").forEach(button=>{
-    button.onclick=()=>{
-      const name=button.dataset.bodyRemove!;
-      document.querySelector<HTMLButtonElement>(`[data-unequip="${CSS.escape(name)}"]`)?.click();
-    };
+    button.onclick=()=>void removeFromBody(button.dataset.bodyRemove!);
   });
 }
 
