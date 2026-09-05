@@ -56,6 +56,10 @@ function symbol(name:string, cls="map-symbol"){
   }
 }
 
+function symbolBody(name:string){
+  return symbol(name).replace(/^<svg[^>]*>/,"").replace(/<\/svg>$/,"");
+}
+
 function terrainButtons(value:string|undefined){
   return TERRAIN.map(t=>`<button class="choice terrain-choice ${value===t?"active":""}" data-terrain-choice="${t}">${t!=="Unknown"?symbol(t,"choice-symbol"):""}<span>${t}</span></button>`).join("");
 }
@@ -86,8 +90,8 @@ function render(){
     const pts=`0,-${r} ${hw},-${q} ${hw},${q} 0,${r} -${hw},${q} -${hw},-${q}`;
     return `<g class="map-hex ${visited?"visited":""} ${hi.explored?"explored":""} ${current?"current":""} ${sel?"selected":""}" data-hex="${h}" transform="translate(${x.toFixed(3)} ${y.toFixed(3)})" aria-label="${h}">
       <polygon points="${pts}"></polygon>
-      ${terrain?`<g class="terrain-glyph" transform="translate(0 3) scale(.82)">${symbol(terrain,"cell-symbol")}</g>`:""}
-      ${icon?`<g class="icon-glyph" transform="translate(0 -13) scale(.58)">${symbol(icon,"cell-symbol")}</g>`:""}
+      ${terrain?`<g class="terrain-glyph" transform="translate(0 3) scale(.82)">${symbolBody(terrain)}</g>`:""}
+      ${icon?`<g class="icon-glyph" transform="translate(0 -13) scale(.58)">${symbolBody(icon)}</g>`:""}
       ${visited?`<circle class="visit-mark" cx="0" cy="-${HEX_RADIUS-9}" r="2.5"></circle>`:""}
     </g>`;
   }).join("");
