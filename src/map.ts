@@ -36,6 +36,12 @@ function iconButtons(value:string|undefined){
 }
 
 function render(){
+  // The map UI is rebuilt on selection/state changes. Preserve the scroll viewport
+  // so tapping a hex on a horizontally scrolled iPad map doesn't jump back left.
+  const previousBoard = app.querySelector<HTMLElement>(".map-board");
+  const previousScrollLeft = previousBoard?.scrollLeft ?? 0;
+  const previousScrollTop = previousBoard?.scrollTop ?? 0;
+
   ensureMap();
   const hexes:string[]=[]; ROWS.forEach((r,ri)=>validCols(ri).forEach(c=>hexes.push(id(r,c))));
   const selectedInfo=info(selected); const canMove=selected!==state.currentHex && adjacent(state.currentHex,selected);
@@ -71,6 +77,16 @@ function render(){
       <p class="hint">Visited hexes remain visibly marked. Movement is limited to adjacent spaces and saves with the Owlbear scene.</p>
     </aside>
   </main></div>`;
+
+  const nextBoard = app.querySelector<HTMLElement>(".map-board");
+  if(nextBoard){
+    nextBoard.scrollLeft = previousScrollLeft;
+    nextBoard.scrollTop = previousScrollTop;
+    requestAnimationFrame(()=>{
+      nextBoard.scrollLeft = previousScrollLeft;
+      nextBoard.scrollTop = previousScrollTop;
+    });
+  }
   wire();
 }
 
