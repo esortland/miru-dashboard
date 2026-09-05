@@ -2,7 +2,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { clamp, loadState, MiruState, saveState, Step } from "./state";
 import "./rules.css";
 
-type Card={title:string;prompt:string;check?:string;roll?:[number,number,string];pages:string[];detail?:string};
+type Card={title:string;prompt:string;check?:string;roll?:[number,number,string];pages:string[];detail?:string;action?:{label:string;step:Step}};
 
 const stepPages:Record<Step,string[]>={
   A:["p.6 Steps in a Turn","p.14 Combat"],B:["p.6 Steps in a Turn"],C:["p.6 Steps in a Turn"],D:["p.6 Steps in a Turn","p.10–11 Bag & Stats"],E:["p.6 Steps in a Turn","p.50–53 Cutscenes"],F:["p.7 Steps in a Turn","p.12 Exploring the Map"],G:["p.7 Steps in a Turn","p.17 Minor Injury"],H:["p.7 Steps in a Turn","p.5 Optional Weather"],I:["p.7 Steps in a Turn"],J:["p.8 Steps in a Turn"],K:["p.8 Steps in a Turn","p.56 Enemies"],L:["p.8 Steps in a Turn"],M:["p.8 Steps in a Turn"],N:["p.9 Steps in a Turn"],O:["p.9 Steps in a Turn"],P:["p.9 Steps in a Turn"]};
@@ -15,6 +15,8 @@ let state:MiruState;
 let previewStep:Step|null=null;
 const hex=()=>state.mapHexes?.[state.currentHex]??{};
 const currentTerrainRoll=()=>state.terrainRoll?.day===state.day&&state.terrainRoll.hex===state.currentHex?state.terrainRoll:null;
+const currentArrival=()=>state.arrival?.day===state.day&&state.arrival.hex===state.currentHex?state.arrival:null;
+const hasCurrentIcon=()=>Boolean(hex().icon&&hex().icon!=="None");
 
 function card(step:Step):Card{
   const h=hex();
@@ -22,6 +24,7 @@ function card(step:Step):Card{
   const terrainPage=h.terrain?terrainPages[h.terrain]:undefined;
   if(terrainPage&&["H","I"].includes(step))pages.push(terrainPage);
   const tr=currentTerrainRoll();
+  const arrival=currentArrival();
 
   switch(step){
     case"A":return{title:"FIGHT ENEMY IN YOUR SPACE",prompt:"Check whether an Enemy shares your current hex. If so, combat begins and the enemy acts first.",check:h.icon==="Enemy"?"Enemy marker found on this hex.":"No Enemy marker is recorded here; verify the map before continuing.",pages};
@@ -29,12 +32,27 @@ function card(step:Step):Card{
     case"C":return{title:"RESET SOLAR ITEMS",prompt:"Make used Solar Items in your possession operable again. Confirm the reset yourself before continuing.",pages};
     case"D":return{title:"MANAGE INVENTORY",prompt:"Rearrange Inventory and Active Body items as needed. In combat, only items on your Active Body may be used.",check:`${state.activeBody.length}/5 Active Body slots currently used.`,pages};
     case"E":return{title:"EXPERIENCE CUTSCENE",prompt:"If the current calendar date has a dot, resolve that Cutscene. Otherwise skip this step.",pages};
-    case"F":return{title:"MOVE",prompt:"Choose where to move. A tile never visited before is a New Tile; a discovered tile or a tile with an icon is an Old Tile.",check:"Choose the destination on the map; you remain in control of the move.",pages};
-    case"G":return{title:"DETERMINE TERRAIN",prompt:"For a New Tile, roll 1d6. Results 2–6 determine terrain. A roll of 1 is a Minor Injury instead: no terrain is discovered that day.",roll:[1,6,"Terrain"],detail:"1 = Minor Injury (p.17) • 2 = Forest (p.18) • 3 = Mountain (p.22) • 4 = Grassland (p.26) • 5 = Desert (p.30) • 6 = Swamp (p.34).",pages};
-    case"H":return tr?.result===1?{title:"WEATHER DOES NOT APPLY",prompt:"Your Step G result was Minor Injury. You do not discover terrain, so there is no terrain weather to check. Continue to Step L after resolving the injury.",check:"Do not choose Unknown as terrain; leave the terrain unrecorded.",pages:[...pages,"p.17 Minor Injury"]}:{title:"CHECK WEATHER",prompt:"Weather is optional. If you are using it, roll 1d6 and reference the current terrain page.",check:h.terrain&&h.terrain!=="Unknown"?`Current terrain: ${h.terrain}.`:"Terrain has not been recorded yet. Return to Step G and apply its result first.",roll:[1,6,"Weather"],pages};
-    case"I":return tr?.result===1?{title:"NEW-TILE EVENT DOES NOT APPLY",prompt:"Your Step G result was Minor Injury. The rules skip the rest of exploration for this day; continue to Step L after resolving the injury.",check:"No terrain or event is recorded for this tile today.",pages:[...pages,"p.17 Minor Injury"]}:{title:"DETERMINE NEW-TILE EVENT",prompt:"For a New Tile, roll 3d6 and use the current terrain page to determine the event. Then follow the event's instructions.",check:h.terrain&&h.terrain!=="Unknown"?`Reference ${h.terrain}.`:"Terrain is not resolved. Return to Step G and apply the terrain result before rolling an event.",roll:[3,6,"Event"],pages};
-    case"J":{const iconPage=h.icon?iconPages[h.icon]:undefined;if(iconPage)pages.push(iconPage);return{title:"EXPERIENCE ICON EVENT",prompt:"On an Old Tile with an icon, go to that icon's event page and experience the event.",check:h.icon&&h.icon!=="None"?`Recorded icon: ${h.icon}.`:"No icon is recorded here; Step K may apply instead.",pages};}
-    case"K":return{title:"DETERMINE OLD-TILE EVENT",prompt:"If this Old Tile has no icon, roll 1d6 and reference p.56 for the result.",roll:[1,6,"Old-tile event"],pages};
+    case"F":return{title:"MOVE",prompt:"Choose an adjacent destination on the map. The companion checks whether it was known before you arrived and routes the tracker to the correct next step.",check:arrival?`This day you moved ${arrival.from} → ${arrival.hex}; it was a ${arrival.kind.toUpperCase()} TILE when you arrived.`:"Choose the destination on the map; movement remains your decision.",pages};
+    case"G":
+      if(arrival?.kind==="old")return{title:"TERRAIN DOES NOT APPLY",prompt:"You arrived on an Old Tile, so do not determine terrain again.",check:hasCurrentIcon()?"This Old Tile has an icon: Step J applies.":"This Old Tile has no icon: Step K applies.",pages};
+      return{title:"DETERMINE TERRAIN",prompt:"For a New Tile, roll 1d6. Results 2–6 determine terrain. A roll of 1 is a Minor Injury instead: no terrain is discovered that day.",roll:[1,6,"Terrain"],detail:"1 = Minor Injury (p.17) • 2 = Forest (p.18) • 3 = Mountain (p.22) • 4 = Grassland (p.26) • 5 = Desert (p.30) • 6 = Swamp (p.34).",pages};
+    case"H":
+      if(arrival?.kind==="old")return{title:"WEATHER DOES NOT APPLY",prompt:"This day's move was to an Old Tile. Step H belongs to the New Tile exploration path.",check:hasCurrentIcon()?"Continue with Step J for the recorded icon.":"Continue with Step K for an Old Tile without an icon.",pages};
+      if(tr?.result===1)return{title:"WEATHER DOES NOT APPLY",prompt:"Your Step G result was Minor Injury. You do not discover terrain, so there is no terrain weather to check. Continue to Step L after resolving the injury.",check:"Do not choose Unknown as terrain; leave the terrain unrecorded.",pages:[...pages,"p.17 Minor Injury"]};
+      return{title:"CHECK WEATHER",prompt:"Weather is optional. If you are using it, roll 1d6 and reference the current terrain page. If not, continue directly to Step I.",check:h.terrain&&h.terrain!=="Unknown"?`Current terrain: ${h.terrain}.`:"Terrain has not been recorded yet. Return to Step G and apply its result first.",roll:[1,6,"Weather"],pages,action:{label:"CONTINUE → STEP I",step:"I"}};
+    case"I":
+      if(arrival?.kind==="old")return{title:"NEW-TILE EVENT DOES NOT APPLY",prompt:"This day's move was to an Old Tile, so do not roll a New Tile event.",check:hasCurrentIcon()?"This Old Tile has an icon: Step J applies.":"This Old Tile has no icon: Step K applies.",pages};
+      if(tr?.result===1)return{title:"NEW-TILE EVENT DOES NOT APPLY",prompt:"Your Step G result was Minor Injury. The rules skip the rest of exploration for this day; continue to Step L after resolving the injury.",check:"No terrain or event is recorded for this tile today.",pages:[...pages,"p.17 Minor Injury"]};
+      return{title:"DETERMINE NEW-TILE EVENT",prompt:"For a New Tile, roll 2d6 and use the sum on the current terrain page to determine the event. Then follow the event's instructions.",check:h.terrain&&h.terrain!=="Unknown"?`Reference ${h.terrain}.`:"Terrain is not resolved. Return to Step G and apply the terrain result before rolling an event.",roll:[2,6,"Event"],pages};
+    case"J":{
+      const iconPage=h.icon?iconPages[h.icon]:undefined;if(iconPage)pages.push(iconPage);
+      if(arrival?.kind==="new")return{title:"ICON EVENT DOES NOT APPLY",prompt:"This day's move was to a New Tile. Finish the New Tile path instead of using the Old Tile icon step.",check:"Use Steps G → optional H → I unless an instruction explicitly redirects you.",pages};
+      return{title:"EXPERIENCE ICON EVENT",prompt:"On an Old Tile with an icon, go to that icon's event page and experience the event.",check:h.icon&&h.icon!=="None"?`Recorded icon: ${h.icon}.`:"No icon is recorded here; Step K applies instead.",pages};
+    }
+    case"K":
+      if(arrival?.kind==="new")return{title:"OLD-TILE EVENT DOES NOT APPLY",prompt:"This day's move was to a New Tile. Finish the New Tile exploration path instead.",check:"Use Steps G → optional H → I unless an instruction explicitly redirects you.",pages};
+      if(hasCurrentIcon())return{title:"USE THE ICON EVENT INSTEAD",prompt:"This Old Tile has a recorded icon, so Step J applies instead of the no-icon Old Tile roll.",check:`Recorded icon: ${h.icon}.`,pages};
+      return{title:"DETERMINE OLD-TILE EVENT",prompt:"If this Old Tile has no icon, roll 1d6 and reference p.56 for the result.",roll:[1,6,"Old-tile event"],pages};
     case"L":return{title:"EAT FOOD",prompt:"If you have Food, you must eat at least one item and may eat up to three. Food is consumed only during this step.",check:`${state.inventory["Meal Bar"]??0} Meal Bars currently tracked.`,pages};
     case"M":return{title:"APPLY FIRST AID",prompt:"If you have a First Aid Kit, you may use it here. Otherwise continue to Step N.",check:state.inventory["First Aid Kit"]?"First Aid Kit found in inventory.":"No First Aid Kit is currently tracked.",pages};
     case"N":return{title:"ATTEMPT TO SLEEP",prompt:"If you can Sleep, you must. Events or weather may prevent it; if you cannot sleep, continue to Step O.",check:"Sleep normally restores +3 HP and +2 EP.",pages};
@@ -54,6 +72,13 @@ function decorateSteps(){
     button.setAttribute("aria-label",`Step ${step}, ${stepPrimaryPage[step]}, what do I do now?`);
     button.innerHTML=`<b>${step}</b><span>${stepPrimaryPage[step]}</span>`;
   });
+}
+
+async function setStep(step:Step){
+  state={...state,step};
+  previewStep=null;
+  await saveState(state);
+  render();
 }
 
 async function applyTerrainResult(result:number){
@@ -76,10 +101,11 @@ function render(){
   document.querySelector("#miru-rule-guide")?.remove();
   const shownStep=previewStep??state.step,c=card(shownStep),sec=document.createElement("section");
   sec.id="miru-rule-guide";sec.className="rule-guide";
-  sec.innerHTML=`<div class="rule-kicker"><span>WHAT DO I DO NOW?</span><b>STEP ${shownStep}</b></div><h2>${c.title}</h2><p class="rule-prompt">${c.prompt}</p>${c.check?`<div class="rule-check">${c.check}</div>`:""}${c.roll?`<div class="rule-roll"><div><span>ROLL / CHECK</span><b>${c.roll[0]}d${c.roll[1]} ${c.roll[2]}</b></div><button id="guide-roll">ROLL ${c.roll[0]}D${c.roll[1]}</button><output id="guide-roll-result">Ready</output><div id="guide-roll-action"></div></div>`:""}${c.detail?`<details class="rule-detail"><summary>Result reference</summary><p>${c.detail}</p></details>`:""}<div class="rule-page-callout"><span>RULEBOOK</span><b>${stepPrimaryPage[shownStep]}</b></div><details class="rule-pages"><summary>All references</summary><div>${c.pages.map(p=>`<span>${p}</span>`).join("")}</div><small>Printed page numbers in your MIRU rulebook PDF.</small></details>`;
+  sec.innerHTML=`<div class="rule-kicker"><span>WHAT DO I DO NOW?</span><b>STEP ${shownStep}</b></div><h2>${c.title}</h2><p class="rule-prompt">${c.prompt}</p>${c.check?`<div class="rule-check">${c.check}</div>`:""}${c.roll?`<div class="rule-roll"><div><span>ROLL / CHECK</span><b>${c.roll[0]}d${c.roll[1]} ${c.roll[2]}</b></div><button id="guide-roll">ROLL ${c.roll[0]}D${c.roll[1]}</button><output id="guide-roll-result">Ready</output><div id="guide-roll-action"></div></div>`:""}${c.action?`<button class="rule-next-action" id="guide-next-action">${c.action.label}</button>`:""}${c.detail?`<details class="rule-detail"><summary>Result reference</summary><p>${c.detail}</p></details>`:""}<div class="rule-page-callout"><span>RULEBOOK</span><b>${stepPrimaryPage[shownStep]}</b></div><details class="rule-pages"><summary>All references</summary><div>${c.pages.map(p=>`<span>${p}</span>`).join("")}</div><small>Printed page numbers in your MIRU rulebook PDF.</small></details>`;
   const turn=[...root.querySelectorAll<HTMLElement>(":scope > section")].find(s=>s.querySelector(".section-title span")?.textContent?.includes("TURN TRACKER"));
   if(turn)turn.insertAdjacentElement("afterend",sec);else root.prepend(sec);
 
+  sec.querySelector("#guide-next-action")?.addEventListener("click",()=>{if(c.action)void setStep(c.action.step)});
   sec.querySelector("#guide-roll")?.addEventListener("click",()=>{
     if(!c.roll)return;
     const r=dice(c.roll[0],c.roll[1]),out=sec.querySelector<HTMLOutputElement>("#guide-roll-result");
