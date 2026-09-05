@@ -151,7 +151,7 @@ function normalizeCombat(raw: unknown): CombatState {
   };
 }
 
-function normalize(raw: unknown): MiruState {
+export function normalizeState(raw: unknown): MiruState {
   const r = (raw && typeof raw === "object" ? raw : {}) as Partial<MiruState> & { playerTokenId?: unknown };
   const validSteps: Step[] = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P"];
   const step = validSteps.includes(r.step as Step) ? (r.step as Step) : DEFAULT_STATE.step;
@@ -185,14 +185,14 @@ function normalize(raw: unknown): MiruState {
 export async function loadState(): Promise<MiruState> {
   const roomMetadata = await OBR.room.getMetadata();
   const roomState = roomMetadata[META_KEY];
-  if (roomState) return normalize(roomState);
+  if (roomState) return normalizeState(roomState);
 
   // One-time migration from the older scene-scoped save so existing campaigns are not lost.
   if (await OBR.scene.isReady()) {
     const sceneMetadata = await OBR.scene.getMetadata();
     const legacyState = sceneMetadata[META_KEY];
     if (legacyState) {
-      const migrated = normalize(legacyState);
+      const migrated = normalizeState(legacyState);
       await OBR.room.setMetadata({ [META_KEY]: migrated });
       return migrated;
     }
@@ -202,5 +202,5 @@ export async function loadState(): Promise<MiruState> {
 }
 
 export async function saveState(state: MiruState): Promise<void> {
-  await OBR.room.setMetadata({ [META_KEY]: normalize(state) });
+  await OBR.room.setMetadata({ [META_KEY]: normalizeState(state) });
 }

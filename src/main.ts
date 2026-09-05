@@ -1,6 +1,6 @@
 import OBR from "@owlbear-rodeo/sdk";
 import "./style.css";
-import { clamp, DEFAULT_COMBAT, DEFAULT_STATE, loadState, MiruState, saveState, Step } from "./state";
+import { clamp, DEFAULT_COMBAT, DEFAULT_STATE, loadState, MiruState, normalizeState, saveState, Step } from "./state";
 import { attemptEscape, basicAttack, enemyTurn, resetCombatLog, startCombat, techAttack, TRAINED_TECH, TrainedTechKey } from "./combat";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -22,6 +22,7 @@ const techSkills = [
 
 let state: MiruState = structuredClone(DEFAULT_STATE);
 let saveTimer: number | undefined;
+let saveLabel = "Saved in this Owlbear room";
 
 function phase(step: Step) {
   const i = steps.indexOf(step);
@@ -31,9 +32,16 @@ function phase(step: Step) {
   return "DARK";
 }
 
+function updateSaveIndicator(label: string) {
+  saveLabel = label;
+  const el = document.querySelector<HTMLElement>("#campaign-save-status");
+  if (el) el.textContent = `${label} • Day ${String(state.day).padStart(2,"0")} • ${state.currentHex}`;
+}
+
 function scheduleSave() {
   window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => void saveState(state), 120);
+  updateSaveIndicator("Saving to this room…");
+  saveTimer = window.setTimeout(() => void saveState(state).then(()=>updateSaveIndicator("Saved in this Owlbear room")), 120);
 }
 
 function setState(patch: Partial<MiruState>) {
@@ -118,6 +126,20 @@ function combatHtml() {
   `;
 }
 
+function campaignSaveHtml() {
+  return `<section class="campaign-save-section">
+    <div class="section-title"><span>CAMPAIGN SAVE</span><small>room-persistent</small></div>
+    <div class="campaign-save-card">
+      <div class="save-status"><i></i><span id="campaign-save-status">${saveLabel} • Day ${String(state.day).padStart(2,"0")} • ${escapeHtml(state.currentHex)}</span></div>
+      <p>Your MIRU campaign stays with this Owlbear room when you close the extension or return later.</p>
+      <div class="save-actions"><button id="export-campaign">Export Save</button><button id="import-campaign">Import Save</button></div>
+      <input id="import-campaign-file" type="file" accept="application/json,.json" hidden>
+      <details class="new-campaign-zone"><summary>Start a new campaign</summary><div class="new-campaign-copy">Clears map exploration, current position, vitals, inventory, notes, combat, and turn progress in this room.</div><button id="new-campaign">Start New Campaign</button></details>
+      <button id="reset-combat" class="reset-combat-only">Reset combat card only</button>
+    </div>
+  </section>`;
+}
+
 function render() {
   app.innerHTML = `
     <header class="hero"><div><div class="eyebrow">MIRU // FIELD CONTROL</div><h1>DAY ${String(state.day).padStart(2,"0")} <span>${phase(state.step)}</span></h1></div><div class="hex">${escapeHtml(state.currentHex)}</div></header>
@@ -161,13 +183,62 @@ function render() {
       <textarea id="notes" rows="4" maxlength="2000" placeholder="Objective, unresolved quest, session notes…">${escapeHtml(state.notes)}</textarea>
     </section>
 
-    <details><summary>Campaign controls</summary><div class="campaign-controls"><button id="reset-combat">Reset combat card</button><button id="reset">Reset MIRU state</button></div></details>
+    ${campaignSaveHtml()}
   `;
   wire();
 }
 
 function escapeHtml(s: string) { return s.replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]!)); }
 async function showError(message: string) { await OBR.notification.show(message, "ERROR"); }
+
+function exportCampaign() {
+  const backup = {
+    format: "miru-companion-campaign",
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    state
+  };
+  const blob = new Blob([JSON.stringify(backup,null,2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `miru-campaign-day-${String(state.day).padStart(2,"0")}-${state.currentHex.toLowerCase()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  void OBR.notification.show("MIRU campaign backup exported.", "SUCCESS");
+}
+
+async function importCampaignFile(file: File) {
+  try {
+    const parsed = JSON.parse(await file.text()) as unknown;
+    if (!parsed || typeof parsed !== "object") throw new Error("Backup is not a JSON object.");
+    const wrapper = parsed as { format?: unknown; state?: unknown };
+    const rawState = wrapper.format === "miru-companion-campaign" ? wrapper.state : parsed;
+    if (!rawState || typeof rawState !== "object" || !("day" in rawState) || !("currentHex" in rawState)) throw new Error("This does not look like a MIRU campaign backup.");
+    const imported = normalizeState(rawState);
+    if (!confirm(`Import this MIRU campaign into the current room?\n\nDay ${String(imported.day).padStart(2,"0")} • ${imported.currentHex}\n\nThis replaces the campaign currently saved in this room.`)) return;
+    window.clearTimeout(saveTimer);
+    state = imported;
+    await saveState(state);
+    saveLabel = "Saved in this Owlbear room";
+    render();
+    void OBR.notification.show("MIRU campaign imported into this room.", "SUCCESS");
+  } catch (error) {
+    void showError(error instanceof Error ? error.message : "Could not import this campaign backup.");
+  }
+}
+
+async function startNewCampaign() {
+  if (!confirm("Start a new MIRU campaign in this Owlbear room?\n\nThis permanently replaces the room's current MIRU campaign state. Export a backup first if you may want to return to it.")) return;
+  window.clearTimeout(saveTimer);
+  state = structuredClone(DEFAULT_STATE);
+  await saveState(state);
+  saveLabel = "Saved in this Owlbear room";
+  render();
+  void OBR.notification.show("New MIRU campaign started.", "SUCCESS");
+}
 
 function updateInventory(name: string, delta: number) {
   const inventory = { ...state.inventory };
@@ -249,16 +320,20 @@ function wire() {
   const notes=document.querySelector<HTMLTextAreaElement>("#notes");
   notes?.addEventListener("input",()=>{state={...state,notes:notes.value.slice(0,2000)};scheduleSave();});
   document.querySelector<HTMLButtonElement>("#reset-combat")?.addEventListener("click",()=>setState({combat:structuredClone(DEFAULT_COMBAT)}));
-  document.querySelector<HTMLButtonElement>("#reset")?.addEventListener("click",async()=>{if(confirm("Reset all MIRU Companion campaign state for this Owlbear room?")){state=structuredClone(DEFAULT_STATE);await saveState(state);render();}});
+  document.querySelector<HTMLButtonElement>("#export-campaign")?.addEventListener("click",exportCampaign);
+  document.querySelector<HTMLButtonElement>("#import-campaign")?.addEventListener("click",()=>document.querySelector<HTMLInputElement>("#import-campaign-file")?.click());
+  document.querySelector<HTMLInputElement>("#import-campaign-file")?.addEventListener("change",event=>{const file=(event.target as HTMLInputElement).files?.[0];if(file)void importCampaignFile(file);});
+  document.querySelector<HTMLButtonElement>("#new-campaign")?.addEventListener("click",()=>void startNewCampaign());
 }
 
 async function boot() {
   await OBR.onReady(async()=>{
     state=await loadState();
+    saveLabel = "Saved in this Owlbear room";
     render();
     OBR.room.onMetadataChange(meta=>{
       if(meta["com.esortland.miru-companion/state"]){
-        void loadState().then(s=>{state=s;render();});
+        void loadState().then(s=>{state=s;saveLabel="Saved in this Owlbear room";render();});
       }
     });
   });
