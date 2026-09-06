@@ -1,129 +1,21 @@
 import { clamp, CombatState, MiruState } from "./state";
+import { COMBAT_ITEMS, hasMelee, hasWeapon, weaponInfo } from "./rules";
 
-export const TRAINED_TECH = {
-  "TS-1": { name: "Dodge & Strike", cost: 2, atk: 2, robotOnly: false },
-  "TS-2": { name: "Roll & Wire Slice", cost: 3, atk: 4, robotOnly: true },
-  "TS-3": { name: "Jump & Attack", cost: 4, atk: 6, robotOnly: false },
-  "TS-4": { name: "EMP Grenade", cost: 2, atk: 0, robotOnly: true }
-} as const;
-
-export type TrainedTechKey = keyof typeof TRAINED_TECH;
-
-function d6() { return Math.floor(Math.random() * 6) + 1; }
-function damage(atk: number, def: number) { return Math.max(0, atk - def); }
-function addLog(combat: CombatState, message: string): CombatState {
-  return { ...combat, log: [...combat.log, message].slice(-30) };
-}
-
-export function startCombat(state: MiruState): MiruState {
-  const c = state.combat;
-  return { ...state, combat: addLog({ ...c, active: true, enemyHp: c.enemyMaxHp }, `Combat started with ${c.enemyName}. Enemy acts first.`) };
-}
-
-export function resetCombatLog(state: MiruState): MiruState {
-  return { ...state, combat: { ...state.combat, log: [] } };
-}
-
-export function enemyTurn(state: MiruState): MiruState {
-  let c = { ...state.combat };
-  if (!c.active) return state;
-
-  if (c.burn > 0) {
-    c.enemyHp = clamp(c.enemyHp - c.burn, 0, c.enemyMaxHp);
-    c = addLog(c, `Burn deals ${c.burn} damage (${c.enemyHp}/${c.enemyMaxHp} HP).`);
-    if (c.enemyHp <= 0) return { ...state, combat: addLog({ ...c, active: false }, `${c.enemyName} is defeated.`) };
-  }
-
-  if (c.stun > 0) {
-    const rolls = Array.from({ length: c.stun }, d6);
-    if (rolls.includes(4)) {
-      c = addLog(c, `STUN ${rolls.join(", ")} — enemy attack skipped.`);
-      c.enemyAtkBonusNext = 0;
-      return { ...state, combat: c };
-    }
-    c = addLog(c, `STUN ${rolls.join(", ")} — no 4; enemy attacks.`);
-  }
-
-  const roll = d6();
-  const baseAtk = roll <= 2 ? c.enemyAtkLow : roll <= 4 ? c.enemyAtkMid : c.enemyAtkHigh;
-  const atk = baseAtk + c.enemyAtkBonusNext;
-  const playerDef = 1 + c.equipmentDef;
-  const dealt = damage(atk, playerDef);
-  const hp = clamp(state.hp - dealt, 0, 20);
-  c.enemyAtkBonusNext = 0;
-  c = addLog(c, `Enemy rolls ${roll}: ${atk} ATK vs ${playerDef} DEF → ${dealt} damage.`);
-  if (hp <= 0) c = addLog(c, "HP reached 0 — MIRU's death rules apply.");
-  return { ...state, hp, combat: c };
-}
-
-export function basicAttack(state: MiruState): MiruState {
-  let c = { ...state.combat };
-  if (!c.active) return state;
-  const atk = 1 + c.weaponAtk;
-  const dealt = damage(atk, c.enemyDef);
-  c.enemyHp = clamp(c.enemyHp - dealt, 0, c.enemyMaxHp);
-  c = addLog(c, `Basic attack: ${atk} ATK vs ${c.enemyDef} DEF → ${dealt} damage.`);
-  if (c.enemyHp <= 0) c = addLog({ ...c, active: false }, `${c.enemyName} is defeated.`);
-  return { ...state, combat: c };
-}
-
-export function techAttack(state: MiruState, key: TrainedTechKey): MiruState {
-  const skill = TRAINED_TECH[key];
-  const level = state.techSkills[key] ?? 0;
-  let c = { ...state.combat };
-  if (!c.active || level < 1) return state;
-  if (state.ep < skill.cost) return { ...state, combat: addLog(c, `${key} failed: needs ${skill.cost} EP.`) };
-  if (skill.robotOnly && !c.robot) return { ...state, combat: addLog(c, `${key} only works against Robots.`) };
-  if (key === "TS-4" && state.techUsedDay[key] === state.day) return { ...state, combat: addLog(c, "TS-4 has already succeeded today.") };
-  if (key === "TS-4" && !state.activeBody.some(x => x.toLowerCase() === "solar taser")) {
-    return { ...state, combat: addLog(c, "TS-4 requires Solar Taser on the Active Body.") };
-  }
-
-  const learned = Object.values(state.techSkills).filter(v => v > 0).length;
-  const diceCount = Math.max(1, Math.min(3, learned));
-  const rolls = level >= 6 ? [] : Array.from({ length: diceCount }, d6);
-  const success = level >= 6 || rolls.some(r => r <= level);
-  const ep = clamp(state.ep - skill.cost, 0, 20);
-  if (!success) {
-    c = addLog(c, `${key} Lv${level}: ${rolls.join(", ")} — miss. -${skill.cost} EP.`);
-    return { ...state, ep, combat: c };
-  }
-
-  const skills = { ...state.techSkills, [key]: Math.min(6, level + 1) };
-  const techUsedDay = { ...state.techUsedDay };
-  if (key === "TS-4") {
-    c.stun = 3;
-    techUsedDay[key] = state.day;
-    c = addLog(c, `TS-4 succeeds — enemy STUN set to 3. Skill → Lv${skills[key]}. -${skill.cost} EP.`);
-  } else {
-    const atk = 1 + c.weaponAtk + skill.atk;
-    const dealt = damage(atk, c.enemyDef);
-    c.enemyHp = clamp(c.enemyHp - dealt, 0, c.enemyMaxHp);
-    c = addLog(c, `${key} succeeds: ${atk} ATK → ${dealt} damage. Skill → Lv${skills[key]}. -${skill.cost} EP.`);
-    if (c.enemyHp <= 0) c = addLog({ ...c, active: false }, `${c.enemyName} is defeated.`);
-  }
-  return { ...state, ep, techSkills: skills, techUsedDay, combat: c };
-}
-
-export function attemptEscape(state: MiruState): MiruState {
-  let c = { ...state.combat };
-  if (!c.active) return state;
-  if (c.escapeLocked) {
-    c = addLog({ ...c, escapeLocked: false }, "Escape unavailable this turn because of the previous odd failed roll.");
-    return { ...state, combat: c };
-  }
-  if (state.ep < 2) return { ...state, combat: addLog(c, "Escape requires 2 EP.") };
-
-  const roll = d6();
-  const ep = clamp(state.ep - 2, 0, 20);
-  if (roll > c.enemyEsc) {
-    c = addLog({ ...c, active: false }, `Escape ${roll} > ESC ${c.enemyEsc}: success. ${roll % 2 === 0 ? "Even → move and skip to Step O." : "Odd → move and skip to Step N."}`);
-    return { ...state, ep, combat: c, step: roll % 2 === 0 ? "O" : "N" };
-  }
-  if (roll % 2 === 0) {
-    c = addLog({ ...c, enemyAtkBonusNext: c.enemyAtkBonusNext + 1 }, `Escape ${roll} ≤ ESC ${c.enemyEsc}: fail. Even → enemy gets +1 ATK next turn.`);
-  } else {
-    c = addLog({ ...c, escapeLocked: true }, `Escape ${roll} ≤ ESC ${c.enemyEsc}: fail. Odd → cannot escape on your next turn.`);
-  }
-  return { ...state, ep, combat: c };
-}
+export const TRAINED_TECH={"TS-1":{name:"Dodge & Strike",cost:2,atk:2,robotOnly:false},"TS-2":{name:"Roll & Wire Slice",cost:3,atk:4,robotOnly:true},"TS-3":{name:"Jump & Attack",cost:4,atk:6,robotOnly:false},"TS-4":{name:"EMP Grenade",cost:2,atk:0,robotOnly:true}} as const;
+export type TrainedTechKey=keyof typeof TRAINED_TECH;
+const d6=()=>Math.floor(Math.random()*6)+1;
+const damage=(atk:number,def:number)=>Math.max(0,atk-def);
+const addLog=(c:CombatState,m:string):CombatState=>({...c,log:[...c.log,m].slice(-40)});
+const weatherAtkPenalty=(s:MiruState)=>s.dayState.weather==="Extreme Winds"?1:s.dayState.weather==="Dense Fog"?2:0;
+const weatherDefPenalty=(s:MiruState)=>s.dayState.weather==="Heavy Rain"?1:s.dayState.weather==="Harsh Snow"?2:0;
+export function playerDefense(s:MiruState){let n=1+s.activeBody.reduce((x,name)=>x+(COMBAT_ITEMS[name]?.def??0),0);if(s.combat.robot&&s.mask==="Cyclops Mask")n+=1;return Math.max(0,n-weatherDefPenalty(s));}
+function robotAtkBonus(s:MiruState){return s.combat.robot&&s.activeBody.includes("Alora Cards")?1:0;}
+function selectedWeapon(s:MiruState){const name=s.combat.selectedWeapon;return name&&s.activeBody.includes(name)&&weaponInfo(name)?.weapon?name:null;}
+function consumeArrow(s:MiruState,name:string|null){if(!name||weaponInfo(name)?.weapon!=="range")return s;if(s.supplies.Arrows<1)return null;return{...s,supplies:{...s.supplies,Arrows:s.supplies.Arrows-1}};}
+function attackValue(s:MiruState,name:string|null,bonus=0){return Math.max(0,1+(name?weaponInfo(name)?.atk??0:0)+robotAtkBonus(s)+bonus-weatherAtkPenalty(s));}
+export function startCombat(s:MiruState){const c=s.combat;return{...s,combat:addLog({...c,active:true,enemyHp:c.enemyMaxHp,rewardRolls:[]},`Combat started with ${c.enemyName}. Enemy acts first.`)};}
+export function resetCombatLog(s:MiruState){return{...s,combat:{...s.combat,log:[]}};}
+export function enemyTurn(s:MiruState){let c={...s.combat};if(!c.active)return s;if(c.burn>0){c.enemyHp=clamp(c.enemyHp-c.burn,0,c.enemyMaxHp);c=addLog(c,`Burn deals ${c.burn} damage (${c.enemyHp}/${c.enemyMaxHp} HP).`);if(c.enemyHp<=0)return{...s,combat:addLog({...c,active:false},`${c.enemyName} is defeated.`)}}if(c.stun>0){const rolls=Array.from({length:c.stun},d6);if(rolls.includes(4)){c=addLog(c,`STUN ${rolls.join(", ")} - enemy attack skipped.`);c.enemyAtkBonusNext=0;return{...s,combat:c}}c=addLog(c,`STUN ${rolls.join(", ")} - no 4; enemy attacks.`)}const roll=d6(),base=roll<=2?c.enemyAtkLow:roll<=4?c.enemyAtkMid:c.enemyAtkHigh,atk=base+c.enemyAtkBonusNext,def=playerDefense(s),dealt=damage(atk,def),hp=clamp(s.hp-dealt,0,20);c.enemyAtkBonusNext=0;c=addLog(c,`Enemy rolls ${roll}: ${atk} ATK vs ${def} DEF -> ${dealt} damage.`);if(hp<=0)c=addLog(c,"HP reached 0 - death rules p.17 apply.");return{...s,hp,combat:c};}
+export function basicAttack(s:MiruState){let c={...s.combat};if(!c.active)return s;const weapon=selectedWeapon(s);const withArrow=consumeArrow(s,weapon);if(withArrow===null)return{...s,combat:addLog(c,"Basic attack needs 1 Arrow for the selected Range Weapon.")};const atk=attackValue(withArrow,weapon),dealt=damage(atk,c.enemyDef);c.enemyHp=clamp(c.enemyHp-dealt,0,c.enemyMaxHp);c=addLog(c,`${weapon??"Fists"}: ${atk} ATK vs ${c.enemyDef} DEF -> ${dealt} damage${weaponInfo(weapon??"")?.weapon==="range"?"; -1 Arrow":""}.`);if(c.enemyHp<=0)c=addLog({...c,active:false},`${c.enemyName} is defeated. Roll ${c.enemySkill} reward D6 (p.16).`);return{...withArrow,combat:c};}
+export function techAttack(s:MiruState,key:TrainedTechKey){const skill=TRAINED_TECH[key],level=s.techSkills[key]??0;let c={...s.combat};if(!c.active||level<1)return s;if(s.ep<skill.cost)return{...s,combat:addLog(c,`${key} needs ${skill.cost} EP.`)};if(skill.robotOnly&&!c.robot)return{...s,combat:addLog(c,`${key} only works against Robots.`)};const weapon=selectedWeapon(s);if((key==="TS-1"||key==="TS-2")&&!hasMelee(s.activeBody))return{...s,combat:addLog(c,`${key} requires a Melee Weapon on the Active Body.`)};if(key==="TS-3"&&!hasWeapon(s.activeBody))return{...s,combat:addLog(c,"TS-3 requires a Weapon on the Active Body.")};if(key==="TS-4"&&!s.tools.includes("Solar Taser"))return{...s,combat:addLog(c,"TS-4 requires the Solar Taser Tool.")};if(key==="TS-4"&&s.techUsedDay[key]===s.day)return{...s,combat:addLog(c,"TS-4 has already succeeded today.")};let working=s;if(key!=="TS-4"&&weapon&&weaponInfo(weapon)?.weapon==="range"){const next=consumeArrow(working,weapon);if(next===null)return{...s,combat:addLog(c,`${key} needs 1 Arrow for the selected Range Weapon.`)};working=next;}const learned=Object.values(s.techSkills).filter(v=>v>0).length,dice=Math.max(1,Math.min(3,learned)),rolls=level>=6?[]:Array.from({length:dice},d6),success=level>=6||rolls.some(r=>r<=level),ep=clamp(working.ep-skill.cost,0,20);if(!success){c=addLog(c,`${key} Lv${level}: ${rolls.join(", ")} - miss. -${skill.cost} EP.`);return{...working,ep,combat:c}}const skills={...working.techSkills,[key]:Math.min(6,level+1)},used={...working.techUsedDay};if(key==="TS-4"){c.stun=3;used[key]=working.day;c=addLog(c,`TS-4 succeeds - STUN 3. Skill -> Lv${skills[key]}. -${skill.cost} EP.`)}else{const atk=attackValue(working,weapon,skill.atk),dealt=damage(atk,c.enemyDef);c.enemyHp=clamp(c.enemyHp-dealt,0,c.enemyMaxHp);c=addLog(c,`${key} succeeds: ${atk} ATK -> ${dealt} damage. Skill -> Lv${skills[key]}. -${skill.cost} EP.`);if(c.enemyHp<=0)c=addLog({...c,active:false},`${c.enemyName} is defeated. Roll ${c.enemySkill} reward D6 (p.16).`)}return{...working,ep,techSkills:skills,techUsedDay:used,combat:c};}
+export function attemptEscape(s:MiruState){let c={...s.combat};if(!c.active)return s;if(s.dayState.weather==="Dense Fog")return{...s,combat:addLog(c,"Dense Fog prevents Escape (p.5).")};if(c.escapeLocked){c=addLog({...c,escapeLocked:false},"Escape unavailable this turn because of the previous odd failed roll.");return{...s,combat:c}}if(s.ep<2)return{...s,combat:addLog(c,"Escape requires 2 EP.")};const roll=d6(),ep=clamp(s.ep-2,0,20);if(roll>c.enemyEsc){const mapHexes={...s.mapHexes,[s.currentHex]:{...s.mapHexes[s.currentHex],icon:"Enemy",enemy:{name:c.enemyName,level:c.enemySkill}}};const nextStep:"N"|"O"=roll%2===0?"O":"N";c=addLog({...c,active:false},`Escape ${roll} > ESC ${c.enemyEsc}: success. Move to an adjacent tile; enemy remains here. ${roll%2===0?"Even -> Step O":"Odd -> Step N"}.`);return{...s,ep,mapHexes,combat:c,step:nextStep}}if(roll%2===0)c=addLog({...c,enemyAtkBonusNext:c.enemyAtkBonusNext+1},`Escape ${roll} <= ESC ${c.enemyEsc}: fail. Even -> enemy +1 ATK next turn.`);else c=addLog({...c,escapeLocked:true},`Escape ${roll} <= ESC ${c.enemyEsc}: fail. Odd -> cannot escape next turn.`);return{...s,ep,combat:c};}
