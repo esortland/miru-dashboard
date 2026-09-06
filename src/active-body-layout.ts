@@ -15,12 +15,6 @@ const shapeLabel: Record<ItemShape,string> = {
   bowtie: "BOWTIE"
 };
 
-const specialSlot: Partial<Record<ItemShape,number>> = {
-  pentagon: 2,
-  chevron: 3,
-  bowtie: 4
-};
-
 function shapeGlyph(shape:ItemShape){
   return `<span class="body-shape-glyph body-shape-${shape}" aria-hidden="true"></span>`;
 }
@@ -28,43 +22,33 @@ function shapeGlyph(shape:ItemShape){
 function activeSlots(){
   if(!state)return [] as Array<string|null>;
   const slots:Array<string|null>=[null,null,null,null,null];
-  const rectangles:string[]=[];
-
-  for(const name of state.activeBody){
-    const shape=itemDefinition(name).shape;
-    const fixed=specialSlot[shape];
-    if(fixed!==undefined && slots[fixed]===null) slots[fixed]=name;
-    else rectangles.push(name);
-  }
-
-  for(const name of rectangles){
-    const open=slots.findIndex(x=>x===null);
-    if(open>=0) slots[open]=name;
-  }
+  state.activeBody.slice(0,5).forEach((name,index)=>{slots[index]=name;});
   return slots;
 }
 
-function allowedFor(index:number){
-  if(index===2)return ["rectangle","pentagon"] as ItemShape[];
-  if(index===3)return ["rectangle","chevron"] as ItemShape[];
-  if(index===4)return ["rectangle","bowtie"] as ItemShape[];
-  return ["rectangle"] as ItemShape[];
+function shapeCounts(){
+  const counts:Record<"pentagon"|"chevron"|"bowtie",number>={pentagon:0,chevron:0,bowtie:0};
+  if(!state)return counts;
+  for(const name of state.activeBody){
+    const shape=itemDefinition(name).shape;
+    if(shape==="pentagon"||shape==="chevron"||shape==="bowtie")counts[shape]++;
+  }
+  return counts;
 }
 
 function slotHtml(index:number,name:string|null){
-  const allowed=allowedFor(index);
   if(name){
     const def=itemDefinition(name);
     return `<div class="body-slot occupied" data-slot="${index+1}" data-shape="${def.shape}">
-      <div class="slot-rail"><span>${String(index+1).padStart(2,"0")}</span><div class="allowed-shapes">${allowed.map(shapeGlyph).join("")}</div></div>
+      <div class="slot-rail"><span>${String(index+1).padStart(2,"0")}</span><div class="allowed-shapes">${shapeGlyph(def.shape)}</div></div>
       <div class="slot-item-shape">${shapeGlyph(def.shape)}</div>
       <div class="slot-item-copy"><b>${esc(name)}</b>${def.effect?`<span>${esc(def.effect)}</span>`:""}<small>${shapeLabel[def.shape]}</small></div>
       <button data-body-remove="${esc(name)}">TO BAG</button>
     </div>`;
   }
   return `<div class="body-slot empty" data-slot="${index+1}">
-    <div class="slot-rail"><span>${String(index+1).padStart(2,"0")}</span><div class="allowed-shapes">${allowed.map(shapeGlyph).join("")}</div></div>
-    <div class="empty-slot-copy"><b>${allowed.map(s=>shapeLabel[s]).join(" / ")}</b><span>OPEN ACTIVE BODY SLOT</span></div>
+    <div class="slot-rail"><span>${String(index+1).padStart(2,"0")}</span><div class="allowed-shapes">${shapeGlyph("rectangle")}${shapeGlyph("pentagon")}${shapeGlyph("chevron")}${shapeGlyph("bowtie")}</div></div>
+    <div class="empty-slot-copy"><b>OPEN ACTIVE BODY SPACE</b><span>Any non-circle item may use this space if its shape limit allows.</span></div>
   </div>`;
 }
 
@@ -80,8 +64,15 @@ function patchActiveBody(){
   const panel=document.querySelector<HTMLElement>(".body-paper");
   if(!panel)return;
   const slots=activeSlots();
+  const counts=shapeCounts();
   panel.innerHTML=`<header><b>ACTIVE BODY</b><span>MAX 5 ITEMS · ${state.activeBody.length}/5</span></header>
-    <div class="body-shape-rule"><b>FIT THE SHAPES</b><span>Rectangles can use any open slot. Pentagon, Chevron, and Bowtie items each have one matching slot.</span></div>
+    <div class="body-shape-rule"><b>ACTIVE BODY SHAPE LIMITS</b><span>Five total items. Rectangles may fill all five spaces. Pentagon, Chevron, and Bowtie are limited to one of each shape.</span></div>
+    <div class="body-shape-totals">
+      <span>${shapeGlyph("rectangle")} RECTANGLES ${state.activeBody.filter(n=>itemDefinition(n).shape==="rectangle").length}/5</span>
+      <span class="${counts.pentagon?"used":""}">${shapeGlyph("pentagon")} PENTAGON ${counts.pentagon}/1</span>
+      <span class="${counts.chevron?"used":""}">${shapeGlyph("chevron")} CHEVRON ${counts.chevron}/1</span>
+      <span class="${counts.bowtie?"used":""}">${shapeGlyph("bowtie")} BOWTIE ${counts.bowtie}/1</span>
+    </div>
     <div class="body-slot-board">${slots.map((name,i)=>slotHtml(i,name)).join("")}</div>`;
 
   panel.querySelectorAll<HTMLButtonElement>("[data-body-remove]").forEach(button=>{
@@ -97,7 +88,7 @@ function patchInventory(){
   if(!legend){
     legend=document.createElement("div");
     legend.className="inventory-shape-legend";
-    legend.innerHTML=`<b>ITEM SHAPES</b><span>${shapeGlyph("rectangle")} Rectangle</span><span>${shapeGlyph("pentagon")} Pentagon</span><span>${shapeGlyph("chevron")} Chevron</span><span>${shapeGlyph("bowtie")} Bowtie</span>`;
+    legend.innerHTML=`<b>ITEM SHAPES</b><span>${shapeGlyph("rectangle")} Rectangle: up to 5</span><span>${shapeGlyph("pentagon")} Pentagon: max 1</span><span>${shapeGlyph("chevron")} Chevron: max 1</span><span>${shapeGlyph("bowtie")} Bowtie: max 1</span>`;
     panel.querySelector("header")?.insertAdjacentElement("afterend",legend);
   }
 

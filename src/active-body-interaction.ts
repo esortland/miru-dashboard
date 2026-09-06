@@ -18,46 +18,32 @@ const shapeLabel: Record<ItemShape,string> = {
 function slots(){
   if(!state)return [] as Array<string|null>;
   const out:Array<string|null>=[null,null,null,null,null];
-  const rectangles:string[]=[];
-  const special:Partial<Record<ItemShape,number>>={pentagon:2,chevron:3,bowtie:4};
-  for(const name of state.activeBody){
-    const shape=itemDefinition(name).shape;
-    const fixed=special[shape];
-    if(fixed!==undefined && out[fixed]===null) out[fixed]=name;
-    else rectangles.push(name);
-  }
-  for(const name of rectangles){
-    const i=out.findIndex(x=>x===null);
-    if(i>=0)out[i]=name;
-  }
+  state.activeBody.slice(0,5).forEach((name,index)=>{out[index]=name;});
   return out;
 }
 
-function slotAllows(index:number,shape:ItemShape){
-  if(shape==="circle")return false;
-  if(shape==="rectangle")return true;
-  if(shape==="pentagon")return index===2;
-  if(shape==="chevron")return index===3;
-  if(shape==="bowtie")return index===4;
-  return false;
+function specialShapeAlreadyUsed(shape:ItemShape){
+  if(!state||shape==="rectangle"||shape==="circle")return false;
+  return state.activeBody.some(name=>itemDefinition(name).shape===shape);
 }
 
 function itemCanBeReadied(name:string){
   if(!state)return false;
   if(state.activeBody.includes(name))return false;
   const shape=itemDefinition(name).shape;
-  const open=slots();
-  return open.some((occupant,index)=>!occupant && slotAllows(index,shape));
+  if(shape==="circle")return false;
+  if(state.activeBody.length>=5)return false;
+  if(specialShapeAlreadyUsed(shape))return false;
+  return true;
 }
 
 async function placeSelected(index:number){
   if(!state||!selectedItem)return;
-  const name=selectedItem;
-  const shape=itemDefinition(name).shape;
   const current=slots();
-  if(current[index] || !slotAllows(index,shape))return;
-  if(!itemCanBeReadied(name))return;
-  state={...state,activeBody:[...state.activeBody,name]};
+  if(current[index] || !itemCanBeReadied(selectedItem))return;
+  const next=[...state.activeBody];
+  next.splice(Math.min(index,next.length),0,selectedItem);
+  state={...state,activeBody:next.slice(0,5)};
   selectedItem=null;
   await saveState(state);
   patch();
@@ -85,7 +71,12 @@ function patchInventory(){
       selectedItem = selectedItem===name ? null : name;
       patch();
     };
-    button.textContent=selectedItem===name ? "CANCEL PLACEMENT" : `PLACE · ${shapeLabel[def.shape]}`;
+    const blockedByShape=specialShapeAlreadyUsed(def.shape);
+    button.textContent=selectedItem===name
+      ? "CANCEL PLACEMENT"
+      : blockedByShape
+        ? `${shapeLabel[def.shape]} LIMIT REACHED`
+        : `PLACE · ${shapeLabel[def.shape]}`;
     button.disabled=!itemCanBeReadied(name) && selectedItem!==name;
     item.classList.toggle("placement-selected",selectedItem===name);
   });
@@ -96,19 +87,24 @@ function patchBody(){
   if(!panel||!state)return;
   const current=slots();
   const selectedShape=selectedItem?itemDefinition(selectedItem).shape:null;
+  const canPlace=Boolean(selectedItem&&itemCanBeReadied(selectedItem));
   panel.classList.toggle("placing-item",Boolean(selectedItem));
   panel.querySelectorAll<HTMLElement>(".body-slot").forEach((slot,index)=>{
     const occupied=current[index];
-    const valid=Boolean(selectedItem && !occupied && selectedShape && slotAllows(index,selectedShape));
+    const valid=Boolean(canPlace&&!occupied);
     slot.classList.toggle("placement-target",valid);
     slot.classList.toggle("placement-blocked",Boolean(selectedItem&&!valid));
+    slot.onclick=null;
+    slot.onkeydown=null;
+    slot.removeAttribute("role");
+    slot.removeAttribute("tabindex");
     if(valid){
       slot.setAttribute("role","button");
       slot.setAttribute("tabindex","0");
       slot.onclick=()=>void placeSelected(index);
       slot.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();void placeSelected(index);}};
       const copy=slot.querySelector<HTMLElement>(".empty-slot-copy");
-      if(copy&&selectedItem)copy.innerHTML=`<b>PLACE ${selectedItem.toUpperCase()}</b><span>${shapeLabel[selectedShape!]} FITS HERE</span>`;
+      if(copy&&selectedItem)copy.innerHTML=`<b>PLACE ${selectedItem.toUpperCase()}</b><span>USES 1 OF 5 ACTIVE BODY SPACES</span>`;
     }
     const remove=slot.querySelector<HTMLButtonElement>("[data-body-remove]");
     if(remove&&occupied){
@@ -122,9 +118,14 @@ function patchBody(){
     prompt.className="body-placement-prompt";
     panel.querySelector("header")?.insertAdjacentElement("afterend",prompt);
   }
+  const shapeRule=selectedShape==="rectangle"
+    ? "Rectangles can fill any of the five Active Body spaces."
+    : selectedShape
+      ? `Only one ${shapeLabel[selectedShape].toLowerCase()} may be in the Active Body at a time.`
+      : "Five total items; Pentagon, Chevron, and Bowtie are limited to one each.";
   prompt.innerHTML=selectedItem
-    ? `<b>${selectedItem}</b><span>Select a highlighted ${shapeLabel[selectedShape!].toLowerCase()}-compatible slot.</span><button id="cancel-body-placement">CANCEL</button>`
-    : `<b>STEP D LOADOUT</b><span>Choose PLACE on an inventory item, then choose exactly where it fits.</span>`;
+    ? `<b>${selectedItem}</b><span>${shapeRule} Choose any highlighted open space.</span><button id="cancel-body-placement">CANCEL</button>`
+    : `<b>STEP D LOADOUT</b><span>Choose PLACE on an inventory item. Shape limits are global, not tied to particular rows.</span>`;
   prompt.querySelector("#cancel-body-placement")?.addEventListener("click",()=>{selectedItem=null;patch();});
 }
 
